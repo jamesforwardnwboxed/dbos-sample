@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: dbos_starter
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: dbos
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d dbos_starter"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  app:
+    build:
+      context: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DBOS_SYSTEM_DATABASE_URL: postgres://postgres:dbos@postgres:5432/dbos_starter
+    ports:
+      - "8000:8000"
+    restart: on-failure
+
+volumes:
+  postgres_data:
