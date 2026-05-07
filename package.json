@@ -1,0 +1,19 @@
+{
+  "name": "dbos-starter",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@dbos-inc/dbos-sdk": "^4.17.6",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.4",
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}
