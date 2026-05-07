@@ -12,24 +12,37 @@ The app exposes `GET /` and runs a DBOS workflow with two steps:
 
 Call the endpoint with an optional `name` query parameter, for example `/?name=James`.
 
-## Requirements
-
-- Java 21+
-- PostgreSQL for the DBOS system database
-- `PGUSER`, `PGPASSWORD`, and `DBOS_SYSTEM_JDBC_URL` set in your environment
-
 ## Run
 
+The whole sample is containerized. You only need Docker and Docker Compose on the host.
+
 ```bash
-./gradlew run
+docker compose up --build
 ```
 
-The server listens on `http://localhost:8000`.
+This starts:
+
+- the app container
+- a Postgres container for the DBOS system database
+
+The app is available at `http://localhost:8000`.
 
 ## Try the recovery flow
 
-1. Start the app.
+1. Start the stack with `docker compose up --build`.
 2. Open `http://localhost:8000/?name=world`.
-3. The first request creates `existing.txt` and exits the process intentionally.
-4. Start the app again with `./gradlew run`.
+3. The first request creates `existing.txt` and exits the app container intentionally.
+4. Docker Compose restarts the app container automatically.
 5. DBOS resumes the workflow from the point after `stepOne`.
+
+## Stop the stack
+
+```bash
+docker compose down
+```
+
+To also remove the Postgres volume:
+
+```bash
+docker compose down -v
+```
