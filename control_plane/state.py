@@ -1,17 +1,30 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import WebSocket
 
+from dbos._client import DBOSClient
+from dbos._schemas.system_database import SystemSchema
+from dbos._serialization import DBOSDefaultSerializer, DBOSPortableJSON, deserialize_args
+import sqlalchemy as sa
+
 from . import protocol
+
+
+ACTIVE_SOURCE_STATUSES = {"PENDING", "ENQUEUED", "DELAYED"}
 
 
 def utc_now() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
+
+
+def utc_now_epoch_ms() -> int:
+    return int(datetime.now(tz=timezone.utc).timestamp() * 1000)
 
 
 @dataclass
@@ -50,10 +63,18 @@ class ConductorEvent:
 
 
 class ConductorManager:
-    def __init__(self, app_name: str, conductor_key: str, request_timeout_seconds: float = 5.0):
+    def __init__(
+        self,
+        app_name: str,
+        conductor_key: str,
+        request_timeout_seconds: float = 5.0,
+        *,
+        system_database_url: str | None = None,
+    ):
         self.app_name = app_name
         self.conductor_key = conductor_key
         self.request_timeout_seconds = request_timeout_seconds
+        self.system_database_url = system_database_url
         self._lock = asyncio.Lock()
         self._session: ExecutorSession | None = None
         self._requests: dict[str, ConductorRequestRecord] = {}
@@ -186,6 +207,286 @@ class ConductorManager:
             queue_name=queue_name,
         )
         return await self._send_request(request.type.value, protocol.message_to_dict(request), request.to_json())
+
+    async def record_local_action(
+        self,
+        message_type: str,
+        request_payload: dict[str, Any],
+        response_payload: dict[str, Any],
+    ) -> ConductorRequestRecord:
+        async with self._lock:
+            record = ConductorRequestRecord(
+                request_id=protocol.new_request_id(),
+                message_type=message_type,
+                request_payload=request_payload,
+                created_at=utc_now(),
+                status="succeeded",
+                dispatched_at=utc_now(),
+                completed_at=utc_now(),
+                response_payload=response_payload,
+            )
+            self._requests[record.request_id] = record
+            self._append_event_locked(
+                "system",
+                message_type,
+                record.request_id,
+                f"completed local {message_type} action",
+            )
+            return record
+
+    async def stage_input_override_fork(
+        self,
+        workflow_id: str,
+        start_step: int,
+        *,
+        input_override: dict[str, Any],
+        new_workflow_id: str | None = None,
+        cancel_original_if_active: bool = False,
+    ) -> ConductorRequestRecord:
+        executor_id, application_version = await self._require_ready_executor_target()
+        response_payload = await asyncio.to_thread(
+            self._stage_input_override_fork_sync,
+            workflow_id,
+            start_step,
+            input_override,
+            new_workflow_id,
+            cancel_original_if_active,
+            executor_id,
+            application_version,
+        )
+        return await self.record_local_action(
+            "stage_input_override_fork",
+            {
+                "workflow_id": workflow_id,
+                "start_step": start_step,
+                "input_override": input_override,
+                "new_workflow_id": new_workflow_id,
+                "cancel_original_if_active": cancel_original_if_active,
+            },
+            response_payload,
+        )
+
+    async def execute_staged_fork(self, workflow_id: str) -> ConductorRequestRecord:
+        executor_id, application_version = await self._require_ready_executor_target()
+        validation = await asyncio.to_thread(
+            self._validate_execute_staged_fork_sync,
+            workflow_id,
+            executor_id,
+            application_version,
+        )
+        recovery_record = await self.send_recovery([executor_id])
+        return await self.record_local_action(
+            "execute_staged_fork",
+            {
+                "workflow_id": workflow_id,
+                "executor_id": executor_id,
+                "application_version": application_version,
+            },
+            {
+                "workflow_id": workflow_id,
+                "execution_requested": True,
+                "recovery_request_id": recovery_record.request_id,
+                "recovery_status": recovery_record.status,
+                "executor_id": executor_id,
+                "application_version": application_version,
+                **validation,
+            },
+        )
+
+    def _stage_input_override_fork_sync(
+        self,
+        workflow_id: str,
+        start_step: int,
+        input_override: dict[str, Any],
+        new_workflow_id: str | None,
+        cancel_original_if_active: bool,
+        executor_id: str,
+        application_version: str,
+    ) -> dict[str, Any]:
+        if start_step != 0:
+            raise ValueError("input_override rerun only supports start_step 0")
+        if self.system_database_url is None:
+            raise RuntimeError("Control plane system database URL is not configured")
+
+        client = DBOSClient(system_database_url=self.system_database_url)
+        try:
+            source_status = client._sys_db.get_workflow_status(workflow_id)
+            if source_status is None:
+                raise LookupError(f"Unknown workflow_id: {workflow_id}")
+            if source_status.get("parent_workflow_id") is not None:
+                raise RuntimeError("input_override fork does not yet support child workflows")
+
+            workflow_inputs = deserialize_args(
+                source_status["inputs"],
+                source_status.get("serialization"),
+                client._serializer,
+            )
+            args = tuple(workflow_inputs.get("args") or ())
+            kwargs = dict(input_override)
+
+            source_serialization = source_status.get("serialization")
+            serialized_inputs, serialization = _serialize_workflow_inputs(
+                args,
+                kwargs,
+                source_serialization,
+                client._serializer,
+            )
+            new_workflow_uuid = new_workflow_id or protocol.new_request_id()
+            current_time_ms = utc_now_epoch_ms()
+
+            replacement_status = {
+                "workflow_uuid": new_workflow_uuid,
+                "status": "PENDING",
+                "name": source_status["name"],
+                "authenticated_user": source_status.get("authenticated_user"),
+                "assumed_role": source_status.get("assumed_role"),
+                "authenticated_roles": source_status.get("authenticated_roles"),
+                "output": None,
+                "error": None,
+                "executor_id": executor_id,
+                "created_at": current_time_ms,
+                "updated_at": current_time_ms,
+                "application_version": application_version,
+                "application_id": source_status.get("app_id") or self.app_name,
+                "class_name": source_status.get("class_name"),
+                "config_name": source_status.get("config_name"),
+                "recovery_attempts": 0,
+                "queue_name": None,
+                "workflow_timeout_ms": source_status.get("workflow_timeout_ms"),
+                "workflow_deadline_epoch_ms": None,
+                "started_at_epoch_ms": None,
+                "deduplication_id": None,
+                "inputs": serialized_inputs,
+                "priority": source_status.get("priority")
+                if isinstance(source_status.get("priority"), int)
+                else 0,
+                "queue_partition_key": None,
+                "forked_from": workflow_id,
+                "was_forked_from": False,
+                "owner_xid": None,
+                "parent_workflow_id": source_status.get("parent_workflow_id"),
+                "serialization": serialization,
+                "delay_until_epoch_ms": None,
+                "rate_limited": False,
+            }
+            source_status_value = source_status.get("status")
+            source_is_active = source_status_value in ACTIVE_SOURCE_STATUSES
+
+            with client._sys_db.engine.begin() as conn:
+                conn.execute(sa.insert(SystemSchema.workflow_status).values(**replacement_status))
+                conn.execute(
+                    sa.update(SystemSchema.workflow_status)
+                    .where(SystemSchema.workflow_status.c.workflow_uuid == workflow_id)
+                    .values(was_forked_from=True)
+                )
+                source_cancelled = False
+                if cancel_original_if_active:
+                    cancel_result = conn.execute(
+                        sa.update(SystemSchema.workflow_status)
+                        .where(SystemSchema.workflow_status.c.workflow_uuid == workflow_id)
+                        .where(
+                            SystemSchema.workflow_status.c.status.in_(
+                                sorted(ACTIVE_SOURCE_STATUSES)
+                            )
+                        )
+                        .values(
+                            status="CANCELLED",
+                            queue_name=None,
+                            deduplication_id=None,
+                            started_at_epoch_ms=None,
+                            delay_until_epoch_ms=None,
+                            updated_at=current_time_ms,
+                        )
+                    )
+                    source_cancelled = cancel_result.rowcount > 0
+
+            return {
+                "new_workflow_id": new_workflow_uuid,
+                "stage_mode": "input_override_fork",
+                "source_workflow_id": workflow_id,
+                "input_override": input_override,
+                "workflow_status": "PENDING",
+                "requires_manual_execution": True,
+                "cancel_original_if_active": cancel_original_if_active,
+                "source_workflow_status": source_status_value,
+                "source_workflow_is_active": source_is_active,
+                "source_workflow_cancelled": source_cancelled,
+            }
+        finally:
+            client.destroy()
+
+    def _validate_execute_staged_fork_sync(
+        self,
+        workflow_id: str,
+        executor_id: str,
+        application_version: str,
+    ) -> dict[str, Any]:
+        if self.system_database_url is None:
+            raise RuntimeError("Control plane system database URL is not configured")
+
+        client = DBOSClient(system_database_url=self.system_database_url)
+        try:
+            workflow_status = client._sys_db.get_workflow_status(workflow_id)
+            if workflow_status is None:
+                raise LookupError(f"Unknown workflow_id: {workflow_id}")
+            if workflow_status.get("status") != "PENDING":
+                raise RuntimeError("Only staged PENDING forks can be executed")
+            if workflow_status.get("queue_name") is not None:
+                raise RuntimeError("Only staged non-queued forks can be executed")
+            if workflow_status.get("forked_from") is None:
+                raise RuntimeError("Only forked workflows can be executed from this action")
+            if workflow_status.get("executor_id") != executor_id:
+                raise RuntimeError("Staged fork executor does not match the active executor session")
+            if workflow_status.get("app_version") != application_version:
+                raise RuntimeError("Staged fork application version does not match the active executor session")
+
+            pending_workflows = client._sys_db.get_pending_workflows(
+                executor_id,
+                application_version,
+            )
+            pending_workflow_ids = sorted(item.workflow_id for item in pending_workflows)
+            if pending_workflow_ids != [workflow_id]:
+                raise RuntimeError(
+                    "Cannot execute staged fork while other pending workflows exist for the same executor/version"
+                )
+
+            return {
+                "validated_workflow_id": workflow_id,
+                "pending_workflow_ids": pending_workflow_ids,
+            }
+        finally:
+            client.destroy()
+
+    async def launch_input_override_rerun(
+        self,
+        workflow_id: str,
+        start_step: int,
+        *,
+        input_override: dict[str, Any],
+        new_workflow_id: str | None = None,
+        cancel_original_if_active: bool = False,
+    ) -> ConductorRequestRecord:
+        return await self.stage_input_override_fork(
+            workflow_id,
+            start_step,
+            input_override=input_override,
+            new_workflow_id=new_workflow_id,
+            cancel_original_if_active=cancel_original_if_active,
+        )
+
+    async def _require_ready_executor_target(self) -> tuple[str, str]:
+        async with self._lock:
+            if self._session is None or self._session.status != "ready":
+                raise RuntimeError("No ready executor session")
+            executor_info = self._session.executor_info or {}
+
+        executor_id = executor_info.get("executor_id")
+        application_version = executor_info.get("application_version")
+        if not isinstance(executor_id, str) or not executor_id:
+            raise RuntimeError("Ready executor session is missing executor_id")
+        if not isinstance(application_version, str) or not application_version:
+            raise RuntimeError("Ready executor session is missing application_version")
+        return executor_id, application_version
 
     async def _send_request(self, message_type: str, request_payload: dict[str, Any], payload_json: str) -> ConductorRequestRecord:
         async with self._lock:
@@ -361,3 +662,23 @@ class ConductorManager:
                 "last_workflow_output": self._last_workflow_output,
                 "last_steps_output": self._last_steps_output,
             }
+
+
+def _serialize_workflow_inputs(
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    serialization: str | None,
+    serializer: Any,
+) -> tuple[str, str]:
+    if serialization == DBOSPortableJSON.name():
+        return (
+            DBOSPortableJSON.serialize(
+                {"positionalArgs": list(args), "namedArgs": kwargs}
+            ),
+            DBOSPortableJSON.name(),
+        )
+    if serialization == DBOSDefaultSerializer.name():
+        return DBOSDefaultSerializer.serialize({"args": args, "kwargs": kwargs}), DBOSDefaultSerializer.name()
+    if serialization is not None and serialization != serializer.name():
+        raise RuntimeError(f"Serialization {serialization} is not available")
+    return serializer.serialize({"args": args, "kwargs": kwargs}), serializer.name()

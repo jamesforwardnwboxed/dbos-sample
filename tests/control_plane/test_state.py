@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from types import SimpleNamespace
 
 import pytest
+import sqlalchemy as sa
 
 from control_plane import protocol
 from control_plane.protocol import ExecutorInfoResponse, MessageType
@@ -339,3 +342,400 @@ async def test_fork_workflow_request_includes_optional_keys_when_omitted() -> No
         "new_workflow_id": "generated-fork-id",
         "error_message": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_record_local_action_updates_snapshot() -> None:
+    manager = ConductorManager(app_name="dbos-starter", conductor_key="local-conductor-key")
+
+    record = await manager.record_local_action(
+        "stage_input_override_fork",
+        {
+            "workflow_id": "wf-1",
+            "start_step": 0,
+            "input_override": {"name": "Ada"},
+            "cancel_original_if_active": True,
+        },
+        {
+            "new_workflow_id": "wf-override",
+            "stage_mode": "input_override_fork",
+        },
+    )
+    snapshot = await manager.snapshot()
+
+    assert record.status == "succeeded"
+    assert snapshot["requests"][0]["message_type"] == "stage_input_override_fork"
+    assert snapshot["requests"][0]["request_payload"]["input_override"] == {"name": "Ada"}
+    assert snapshot["events"][0]["summary"] == "completed local stage_input_override_fork action"
+
+
+def test_stage_input_override_fork_sync_stages_pending_workflow_and_cancels_active_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = ConductorManager(
+        app_name="dbos-starter",
+        conductor_key="local-conductor-key",
+        system_database_url="postgres://postgres:dbos@postgres:5432/dbos_starter",
+    )
+
+    source_status = {
+        "status": "PENDING",
+        "name": "dbos_workflow",
+        "class_name": None,
+        "config_name": None,
+        "queue_name": None,
+        "app_version": "v1",
+        "app_id": "dbos-starter",
+        "authenticated_user": None,
+        "authenticated_roles": json.dumps(["admin"]),
+        "assumed_role": None,
+        "priority": 0,
+        "queue_partition_key": None,
+        "workflow_timeout_ms": None,
+        "parent_workflow_id": None,
+        "inputs": "serialized-inputs",
+        "serialization": "py_pickle",
+    }
+
+    captured: dict[str, object] = {}
+
+    class DummyClient:
+        def __init__(self, system_database_url: str) -> None:
+            captured["system_database_url"] = system_database_url
+            self._serializer = object()
+            self._sys_db = SimpleNamespace(
+                get_workflow_status=lambda workflow_id: source_status if workflow_id == "wf-1" else None,
+                engine=SimpleNamespace(begin=lambda: _DummyBeginContext(captured)),
+            )
+
+        def destroy(self) -> None:
+            captured["destroyed"] = True
+
+    monkeypatch.setattr("control_plane.state.DBOSClient", DummyClient)
+    monkeypatch.setattr(
+        "control_plane.state.deserialize_args",
+        lambda inputs, serialization, serializer: {"args": (), "kwargs": {"name": "world"}},
+    )
+    monkeypatch.setattr(
+        "control_plane.state._serialize_workflow_inputs",
+        lambda args, kwargs, serialization, serializer: ("serialized-override", "py_pickle"),
+    )
+
+    response = manager._stage_input_override_fork_sync(
+        "wf-1",
+        0,
+        {"name": "Ada"},
+        "wf-override",
+        True,
+        "executor-1",
+        "v-ready",
+    )
+
+    insert_statement = captured["statements"][0]
+    insert_params = insert_statement.compile().params
+    source_lineage_update = captured["statements"][1]
+    source_cancel_update = captured["statements"][2]
+    source_cancel_params = source_cancel_update.compile().params
+
+    assert captured["system_database_url"] == "postgres://postgres:dbos@postgres:5432/dbos_starter"
+    assert insert_params["workflow_uuid"] == "wf-override"
+    assert insert_params["status"] == "PENDING"
+    assert insert_params["name"] == "dbos_workflow"
+    assert insert_params["application_version"] == "v-ready"
+    assert insert_params["application_id"] == "dbos-starter"
+    assert insert_params["executor_id"] == "executor-1"
+    assert insert_params["inputs"] == "serialized-override"
+    assert insert_params["serialization"] == "py_pickle"
+    assert insert_params["forked_from"] == "wf-1"
+    assert insert_params["queue_name"] is None
+    assert insert_params["priority"] == 0
+    assert insert_params["authenticated_roles"] == json.dumps(["admin"])
+    assert "was_forked_from" in str(source_lineage_update)
+    assert source_cancel_params["status"] == "CANCELLED"
+    assert sorted(source_cancel_params["status_1"]) == ["DELAYED", "ENQUEUED", "PENDING"]
+    assert response == {
+        "new_workflow_id": "wf-override",
+        "stage_mode": "input_override_fork",
+        "source_workflow_id": "wf-1",
+        "input_override": {"name": "Ada"},
+        "workflow_status": "PENDING",
+        "requires_manual_execution": True,
+        "cancel_original_if_active": True,
+        "source_workflow_status": "PENDING",
+        "source_workflow_is_active": True,
+        "source_workflow_cancelled": True,
+    }
+    assert captured["destroyed"] is True
+
+
+def test_stage_input_override_fork_sync_requires_step_zero() -> None:
+    manager = ConductorManager(app_name="dbos-starter", conductor_key="local-conductor-key")
+
+    with pytest.raises(ValueError) as exc_info:
+        manager._stage_input_override_fork_sync("wf-1", 2, {"name": "Ada"}, None, False, "executor-1", "v1")
+
+    assert str(exc_info.value) == "input_override rerun only supports start_step 0"
+
+
+def test_stage_input_override_fork_sync_preserves_positive_priority(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = ConductorManager(
+        app_name="dbos-starter",
+        conductor_key="local-conductor-key",
+        system_database_url="postgres://postgres:dbos@postgres:5432/dbos_starter",
+    )
+
+    source_status = {
+        "status": "PENDING",
+        "name": "dbos_workflow",
+        "class_name": None,
+        "config_name": None,
+        "queue_name": None,
+        "app_version": "v1",
+        "app_id": "dbos-starter",
+        "authenticated_user": None,
+        "authenticated_roles": None,
+        "assumed_role": None,
+        "priority": 7,
+        "queue_partition_key": None,
+        "workflow_timeout_ms": None,
+        "parent_workflow_id": None,
+        "inputs": "serialized-inputs",
+        "serialization": "py_pickle",
+    }
+
+    captured: dict[str, object] = {}
+
+    class DummyClient:
+        def __init__(self, system_database_url: str) -> None:
+            self._serializer = object()
+            self._sys_db = SimpleNamespace(
+                get_workflow_status=lambda workflow_id: source_status,
+                engine=SimpleNamespace(begin=lambda: _DummyBeginContext(captured)),
+            )
+
+        def destroy(self) -> None:
+            return None
+
+    monkeypatch.setattr("control_plane.state.DBOSClient", DummyClient)
+    monkeypatch.setattr(
+        "control_plane.state.deserialize_args",
+        lambda inputs, serialization, serializer: {"args": (), "kwargs": {"name": "world"}},
+    )
+    monkeypatch.setattr(
+        "control_plane.state._serialize_workflow_inputs",
+        lambda args, kwargs, serialization, serializer: ("serialized-override", "py_pickle"),
+    )
+
+    manager._stage_input_override_fork_sync("wf-1", 0, {"name": "Ada"}, None, False, "executor-1", "v1")
+
+    insert_statement = captured["statements"][0]
+    assert insert_statement.compile().params["priority"] == 7
+
+
+def test_stage_input_override_fork_sync_leaves_terminal_source_unchanged_when_cancel_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = ConductorManager(
+        app_name="dbos-starter",
+        conductor_key="local-conductor-key",
+        system_database_url="postgres://postgres:dbos@postgres:5432/dbos_starter",
+    )
+
+    source_status = {
+        "status": "SUCCESS",
+        "name": "dbos_workflow",
+        "class_name": None,
+        "config_name": None,
+        "queue_name": None,
+        "app_version": "v1",
+        "app_id": "dbos-starter",
+        "authenticated_user": None,
+        "authenticated_roles": None,
+        "assumed_role": None,
+        "priority": 0,
+        "queue_partition_key": None,
+        "workflow_timeout_ms": None,
+        "parent_workflow_id": None,
+        "inputs": "serialized-inputs",
+        "serialization": "py_pickle",
+    }
+
+    captured: dict[str, object] = {}
+    captured["rowcounts"] = [1, 1, 0]
+
+    class DummyClient:
+        def __init__(self, system_database_url: str) -> None:
+            self._serializer = object()
+            self._sys_db = SimpleNamespace(
+                get_workflow_status=lambda workflow_id: source_status,
+                engine=SimpleNamespace(begin=lambda: _DummyBeginContext(captured)),
+            )
+
+        def destroy(self) -> None:
+            return None
+
+    monkeypatch.setattr("control_plane.state.DBOSClient", DummyClient)
+    monkeypatch.setattr(
+        "control_plane.state.deserialize_args",
+        lambda inputs, serialization, serializer: {"args": (), "kwargs": {"name": "world"}},
+    )
+    monkeypatch.setattr(
+        "control_plane.state._serialize_workflow_inputs",
+        lambda args, kwargs, serialization, serializer: ("serialized-override", "py_pickle"),
+    )
+
+    response = manager._stage_input_override_fork_sync("wf-1", 0, {"name": "Ada"}, None, True, "executor-1", "v1")
+
+    source_cancel_update = captured["statements"][2]
+    source_cancel_params = source_cancel_update.compile().params
+    assert source_cancel_params["status"] == "CANCELLED"
+    assert sorted(source_cancel_params["status_1"]) == ["DELAYED", "ENQUEUED", "PENDING"]
+    assert response["source_workflow_cancelled"] is False
+
+
+def test_stage_input_override_fork_sync_skips_cancel_update_when_not_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = ConductorManager(
+        app_name="dbos-starter",
+        conductor_key="local-conductor-key",
+        system_database_url="postgres://postgres:dbos@postgres:5432/dbos_starter",
+    )
+
+    source_status = {
+        "status": "PENDING",
+        "name": "dbos_workflow",
+        "class_name": None,
+        "config_name": None,
+        "queue_name": None,
+        "app_version": "v1",
+        "app_id": "dbos-starter",
+        "authenticated_user": None,
+        "authenticated_roles": None,
+        "assumed_role": None,
+        "priority": 0,
+        "queue_partition_key": None,
+        "workflow_timeout_ms": None,
+        "parent_workflow_id": None,
+        "inputs": "serialized-inputs",
+        "serialization": "py_pickle",
+    }
+
+    captured: dict[str, object] = {}
+
+    class DummyClient:
+        def __init__(self, system_database_url: str) -> None:
+            self._serializer = object()
+            self._sys_db = SimpleNamespace(
+                get_workflow_status=lambda workflow_id: source_status,
+                engine=SimpleNamespace(begin=lambda: _DummyBeginContext(captured)),
+            )
+
+        def destroy(self) -> None:
+            return None
+
+    monkeypatch.setattr("control_plane.state.DBOSClient", DummyClient)
+    monkeypatch.setattr(
+        "control_plane.state.deserialize_args",
+        lambda inputs, serialization, serializer: {"args": (), "kwargs": {"name": "world"}},
+    )
+    monkeypatch.setattr(
+        "control_plane.state._serialize_workflow_inputs",
+        lambda args, kwargs, serialization, serializer: ("serialized-override", "py_pickle"),
+    )
+
+    response = manager._stage_input_override_fork_sync("wf-1", 0, {"name": "Ada"}, None, False, "executor-1", "v1")
+
+    assert len(captured["statements"]) == 2
+    assert response["source_workflow_cancelled"] is False
+
+
+def test_validate_execute_staged_fork_sync_rejects_other_pending_workflows(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = ConductorManager(
+        app_name="dbos-starter",
+        conductor_key="local-conductor-key",
+        system_database_url="postgres://postgres:dbos@postgres:5432/dbos_starter",
+    )
+
+    workflow_status = {
+        "status": "PENDING",
+        "queue_name": None,
+        "forked_from": "wf-source",
+        "executor_id": "executor-1",
+        "app_version": "v1",
+    }
+
+    class DummyPending:
+        def __init__(self, workflow_id: str) -> None:
+            self.workflow_id = workflow_id
+
+    class DummyClient:
+        def __init__(self, system_database_url: str) -> None:
+            self._sys_db = SimpleNamespace(
+                get_workflow_status=lambda workflow_id: workflow_status,
+                get_pending_workflows=lambda executor_id, app_version: [
+                    DummyPending("wf-staged"),
+                    DummyPending("wf-other"),
+                ],
+            )
+
+        def destroy(self) -> None:
+            return None
+
+    monkeypatch.setattr("control_plane.state.DBOSClient", DummyClient)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        manager._validate_execute_staged_fork_sync("wf-staged", "executor-1", "v1")
+
+    assert "other pending workflows exist" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_execute_staged_fork_requests_recovery_for_single_pending_workflow(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager, _websocket = await make_ready_manager()
+
+    monkeypatch.setattr(
+        manager,
+        "_validate_execute_staged_fork_sync",
+        lambda workflow_id, executor_id, application_version: {
+            "validated_workflow_id": workflow_id,
+            "pending_workflow_ids": [workflow_id],
+        },
+    )
+
+    captured: dict[str, object] = {}
+
+    async def fake_send_recovery(executor_ids: list[str]):
+        captured["executor_ids"] = executor_ids
+        return SimpleNamespace(
+            request_id="req-recovery",
+            status="succeeded",
+            response_payload={"success": True},
+        )
+
+    monkeypatch.setattr(manager, "send_recovery", fake_send_recovery)
+
+    record = await manager.execute_staged_fork("wf-staged")
+
+    assert captured["executor_ids"] == ["executor-1"]
+    assert record.message_type == "execute_staged_fork"
+    assert record.response_payload["execution_requested"] is True
+    assert record.response_payload["validated_workflow_id"] == "wf-staged"
+
+
+class _DummyBeginContext:
+    def __init__(self, captured: dict[str, object]) -> None:
+        self.captured = captured
+
+    def __enter__(self):
+        return _DummyConnection(self.captured)
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+
+class _DummyConnection:
+    def __init__(self, captured: dict[str, object]) -> None:
+        self.captured = captured
+
+    def execute(self, statement):
+        assert isinstance(statement, sa.sql.Executable)
+        self.captured.setdefault("statements", []).append(statement)
+        rowcounts = self.captured.get("rowcounts")
+        if isinstance(rowcounts, list) and rowcounts:
+            return SimpleNamespace(rowcount=rowcounts.pop(0))
+        return SimpleNamespace(rowcount=1)

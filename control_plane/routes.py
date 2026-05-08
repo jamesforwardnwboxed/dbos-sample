@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +8,35 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
 STATIC_DIR = Path(__file__).with_name("static")
+
+
+def _validate_input_override(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail="input_override must be a JSON object")
+    return value
+
+
+def _derive_input_override_seed(workflow_output: Any) -> dict[str, Any] | None:
+    if not isinstance(workflow_output, dict):
+        return None
+
+    raw_input = workflow_output.get("Input")
+    if not isinstance(raw_input, str) or not raw_input.strip():
+        return None
+
+    try:
+        parsed_input = ast.literal_eval(raw_input)
+    except (ValueError, SyntaxError):
+        return None
+
+    if not isinstance(parsed_input, dict):
+        return None
+
+    kwargs = parsed_input.get("kwargs")
+    if isinstance(kwargs, dict):
+        return kwargs
+
+    return parsed_input
 
 router = APIRouter()
 
@@ -29,6 +59,7 @@ async def list_workflows(request: Request, payload: dict[str, Any] | None = None
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     return {
         "request_id": record.request_id,
         "status": record.status,
@@ -46,6 +77,7 @@ async def list_queued_workflows(
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     return {
         "request_id": record.request_id,
         "status": record.status,
@@ -69,10 +101,13 @@ async def get_workflow(
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    input_override_seed = _derive_input_override_seed(record.response_payload.get("output"))
     return {
         "request_id": record.request_id,
         "status": record.status,
         "response": record.response_payload,
+        "input_override_seed": input_override_seed,
     }
 
 
@@ -171,6 +206,26 @@ async def restart_workflow(
     }
 
 
+@router.post("/api/control-plane/execute-staged-fork")
+async def execute_staged_fork(
+    request: Request, payload: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    workflow_id = (payload or {}).get("workflow_id")
+    if not workflow_id:
+        raise HTTPException(status_code=400, detail="workflow_id is required")
+    try:
+        record = await request.app.state.conductor_manager.execute_staged_fork(workflow_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "request_id": record.request_id,
+        "status": record.status,
+        "response": record.response_payload,
+    }
+
+
 @router.post("/api/control-plane/fork")
 async def fork_workflow(
     request: Request, payload: dict[str, Any] | None = None
@@ -187,6 +242,30 @@ async def fork_workflow(
         parsed_start_step = int(start_step)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="start_step must be an integer") from exc
+
+    input_override = data.get("input_override")
+    if input_override is not None:
+        if parsed_start_step != 0:
+            raise HTTPException(status_code=400, detail="input_override requires start_step 0")
+        try:
+            record = await request.app.state.conductor_manager.stage_input_override_fork(
+                workflow_id,
+                parsed_start_step,
+                input_override=_validate_input_override(input_override),
+                new_workflow_id=data.get("new_workflow_id") or None,
+                cancel_original_if_active=bool(data.get("cancel_original_if_active", False)),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {
+            "request_id": record.request_id,
+            "status": record.status,
+            "response": record.response_payload,
+        }
 
     try:
         record = await request.app.state.conductor_manager.send_fork_workflow(
