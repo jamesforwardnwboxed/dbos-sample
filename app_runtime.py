@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Any
 
@@ -5,18 +6,25 @@ from dbos import DBOS, DBOSConfig
 from fastapi import FastAPI
 
 app = FastAPI()
+logger = logging.getLogger("dbos_starter")
 
 
 @DBOS.step()
 def step_one(name: str) -> int:
-    print(f"Hello {name}")
-    print("Step one completed!")
+    logger.debug("Hello %s", name)
+    logger.debug("Step one completed")
     return len(name)
 
 
 @DBOS.step()
 def step_two(name: str, name_length: int) -> None:
-    print(f"Step two completed for {name}; the name has {name_length} characters.")
+    logger.debug("Step two completed for %s; the name has %d characters.", name, name_length)
+
+
+def configure_logging() -> None:
+    level_name = os.environ.get("APP_LOG_LEVEL", "warning").upper()
+    level = getattr(logging, level_name, logging.WARNING)
+    logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s", force=True)
 
 
 def get_existing_file_path() -> str:

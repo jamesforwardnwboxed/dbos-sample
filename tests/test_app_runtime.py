@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 import app_runtime
@@ -55,3 +57,19 @@ def test_run_workflow_logic_completes_when_file_exists(
     app_runtime.run_workflow_logic("James")
 
     assert events == [("James", 5)]
+
+
+def test_configure_logging_defaults_to_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("APP_LOG_LEVEL", raising=False)
+
+    app_runtime.configure_logging()
+
+    assert logging.getLogger().getEffectiveLevel() == logging.WARNING
+
+
+def test_configure_logging_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_LOG_LEVEL", "debug")
+
+    app_runtime.configure_logging()
+
+    assert logging.getLogger().getEffectiveLevel() == logging.DEBUG

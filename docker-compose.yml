@@ -26,6 +26,8 @@ services:
       DBOS_SYSTEM_DATABASE_URL: postgres://postgres:dbos@postgres:5432/dbos_starter
       DBOS_CONDUCTOR_URL: ws://control-plane:8001
       DBOS_CONDUCTOR_KEY: local-conductor-key
+      APP_LOG_LEVEL: warning
+      APP_ACCESS_LOG: "false"
     ports:
       - "8000:8000"
     restart: on-failure
@@ -37,6 +39,8 @@ services:
       CONTROL_PLANE_CONDUCTOR_KEY: local-conductor-key
       CONTROL_PLANE_SYSTEM_DATABASE_URL: postgres://postgres:dbos@postgres:5432/dbos_starter
       CONTROL_PLANE_PORT: 8001
+      CONTROL_PLANE_LOG_LEVEL: warning
+      CONTROL_PLANE_ACCESS_LOG: "false"
     ports:
       - "8001:8001"
     restart: on-failure
