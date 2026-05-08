@@ -8,7 +8,7 @@
   --border-strong: #d6cfbf;
   --text-1: #1f1c17;
   --text-2: #5b5448;
-  --text-3: #8c8375;
+  --text-3: #756d5f;
   --accent: #c76d3a;
   --accent-strong: #ab5828;
   --accent-soft: #f4e4d9;
@@ -220,6 +220,10 @@ button {
   min-width: 0;
 }
 
+.sess-field + .sess-field {
+  border-left: 1px solid var(--border);
+}
+
 .sess-label,
 .panel-title,
 .workflow-table th,
@@ -245,9 +249,7 @@ button {
 .sess-value.dim { color: var(--text-3); }
 
 .sess-divider {
-  width: 1px;
-  background: var(--border);
-  align-self: stretch;
+  display: none;
 }
 
 .notice {
@@ -350,8 +352,13 @@ button {
 }
 
 .btn-icon {
-  font-size: 13px;
-  opacity: 0.72;
+  font-size: 16px;
+  opacity: 0.9;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  line-height: 1;
 }
 
 .btn-warn,
@@ -536,7 +543,7 @@ button {
 
 .ev-dir-in { color: var(--blue); }
 .ev-dir-out { color: var(--accent-strong); }
-.ev-dir-sys { color: var(--slate); }
+.ev-dir-sys { color: var(--slate); font-size: 12px; }
 
 .req-row {
   display: grid;

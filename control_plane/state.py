@@ -308,6 +308,16 @@ class ConductorManager:
         staged_workflow_id = (stage_record.response_payload or {}).get("new_workflow_id")
         if not staged_workflow_id:
             raise RuntimeError("Staged fork did not return a new_workflow_id")
+        # Clear any prior orphan staged PENDING forks for this executor so the
+        # recovery-driven execute step can run without tripping the
+        # "other pending workflows exist" guard.
+        executor_id, application_version = await self._require_ready_executor_target()
+        cancelled_orphans = await asyncio.to_thread(
+            self._cancel_orphan_staged_forks_sync,
+            staged_workflow_id,
+            executor_id,
+            application_version,
+        )
         execute_record = await self.execute_staged_fork(staged_workflow_id)
         combined_payload = dict(stage_record.response_payload or {})
         combined_payload.update(
@@ -317,6 +327,7 @@ class ConductorManager:
                 "execute_status": execute_record.status,
                 "requires_manual_execution": False,
                 "stage_mode": "run_edited_fork",
+                "cancelled_orphan_staged_forks": cancelled_orphans,
             }
         )
         return await self.record_local_action(
@@ -390,71 +401,89 @@ class ConductorManager:
             source_status_value = source_status.get("status")
             source_is_active = source_status_value in ACTIVE_SOURCE_STATUSES
 
-            with client._sys_db.engine.begin() as conn:
-                client._sys_db.fork_workflow(
-                    [workflow_id],
-                    [new_workflow_uuid],
-                    [start_step],
-                    application_version=application_version,
-                    queue_name=None,
-                )
-                conn.execute(
-                    sa.update(SystemSchema.workflow_status)
-                    .where(SystemSchema.workflow_status.c.workflow_uuid == new_workflow_uuid)
-                    .values(
-                        status="PENDING",
-                        queue_name=None,
-                        executor_id=executor_id,
-                        updated_at=current_time_ms,
-                        workflow_deadline_epoch_ms=None,
-                        started_at_epoch_ms=None,
-                        delay_until_epoch_ms=None,
-                        rate_limited=False,
-                        output=None,
-                        error=None,
-                        recovery_attempts=0,
-                        deduplication_id=None,
-                    )
-                )
+            # fork_workflow opens its own transaction; do it first so we know
+            # the forked row exists before we try to apply overrides.
+            client._sys_db.fork_workflow(
+                [workflow_id],
+                [new_workflow_uuid],
+                [start_step],
+                application_version=application_version,
+                queue_name=None,
+            )
 
-                if normalized_input_override is not None:
-                    serialized_inputs, serialization = _build_workflow_input_override(
-                        source_status,
-                        normalized_input_override,
-                        client._serializer,
-                    )
+            try:
+                with client._sys_db.engine.begin() as conn:
                     conn.execute(
                         sa.update(SystemSchema.workflow_status)
                         .where(SystemSchema.workflow_status.c.workflow_uuid == new_workflow_uuid)
                         .values(
-                            inputs=serialized_inputs,
-                            serialization=serialization,
+                            status="PENDING",
+                            queue_name=None,
+                            executor_id=executor_id,
                             updated_at=current_time_ms,
+                            workflow_deadline_epoch_ms=None,
+                            started_at_epoch_ms=None,
+                            delay_until_epoch_ms=None,
+                            rate_limited=False,
+                            output=None,
+                            error=None,
+                            recovery_attempts=0,
+                            deduplication_id=None,
                         )
                     )
 
-                patched_step_ids: list[int] = []
-                for function_id, output_override in normalized_step_overrides.items():
-                    if function_id >= start_step:
-                        raise ValueError(
-                            f"step_output_overrides only supports preserved steps before start_step {start_step}"
+                    if normalized_input_override is not None:
+                        serialized_inputs, serialization = _build_workflow_input_override(
+                            source_status,
+                            normalized_input_override,
+                            client._serializer,
                         )
-                    patched_step_ids.append(
-                        _patch_forked_step_output(
-                            conn,
-                            source_workflow_id=workflow_id,
-                            forked_workflow_id=new_workflow_uuid,
-                            function_id=function_id,
-                            serializer=client._serializer,
-                            output_override=output_override,
+                        conn.execute(
+                            sa.update(SystemSchema.workflow_status)
+                            .where(SystemSchema.workflow_status.c.workflow_uuid == new_workflow_uuid)
+                            .values(
+                                inputs=serialized_inputs,
+                                serialization=serialization,
+                                updated_at=current_time_ms,
+                            )
                         )
-                    )
 
-                conn.execute(
-                    sa.update(SystemSchema.workflow_status)
-                    .where(SystemSchema.workflow_status.c.workflow_uuid == workflow_id)
-                    .values(was_forked_from=True)
-                )
+                    patched_step_ids: list[int] = []
+                    for function_id, output_override in normalized_step_overrides.items():
+                        if function_id >= start_step:
+                            raise ValueError(
+                                f"step_output_overrides only supports preserved steps before start_step {start_step}"
+                            )
+                        patched_step_ids.append(
+                            _patch_forked_step_output(
+                                conn,
+                                source_workflow_id=workflow_id,
+                                forked_workflow_id=new_workflow_uuid,
+                                function_id=function_id,
+                                serializer=client._serializer,
+                                output_override=output_override,
+                            )
+                        )
+
+                    conn.execute(
+                        sa.update(SystemSchema.workflow_status)
+                        .where(SystemSchema.workflow_status.c.workflow_uuid == workflow_id)
+                        .values(was_forked_from=True)
+                    )
+            except Exception:
+                # Override application failed AFTER fork_workflow committed.
+                # Mark the forked workflow CANCELLED so we don't leave behind
+                # a runnable fork without its intended overrides.
+                try:
+                    with client._sys_db.engine.begin() as cleanup_conn:
+                        cleanup_conn.execute(
+                            sa.update(SystemSchema.workflow_status)
+                            .where(SystemSchema.workflow_status.c.workflow_uuid == new_workflow_uuid)
+                            .values(status="CANCELLED", updated_at=utc_now_epoch_ms())
+                        )
+                except Exception:
+                    pass
+                raise
 
             return {
                 "new_workflow_id": new_workflow_uuid,
@@ -472,6 +501,41 @@ class ConductorManager:
                 "source_workflow_status": source_status_value,
                 "source_workflow_is_active": source_is_active,
             }
+        finally:
+            client.destroy()
+
+    def _cancel_orphan_staged_forks_sync(
+        self,
+        keep_workflow_id: str,
+        executor_id: str,
+        application_version: str,
+    ) -> list[str]:
+        """Cancel any other PENDING staged forks for the same executor/version,
+        so the recovery-driven execute path doesn't fail validation. Returns
+        the workflow ids that were cancelled."""
+        if self.system_database_url is None:
+            raise RuntimeError("Control plane system database URL is not configured")
+
+        client = DBOSClient(system_database_url=self.system_database_url)
+        try:
+            with client._sys_db.engine.begin() as conn:
+                rows = conn.execute(
+                    sa.select(SystemSchema.workflow_status.c.workflow_uuid)
+                    .where(SystemSchema.workflow_status.c.status == "PENDING")
+                    .where(SystemSchema.workflow_status.c.executor_id == executor_id)
+                    .where(SystemSchema.workflow_status.c.application_version == application_version)
+                    .where(SystemSchema.workflow_status.c.queue_name.is_(None))
+                    .where(SystemSchema.workflow_status.c.forked_from.is_not(None))
+                    .where(SystemSchema.workflow_status.c.workflow_uuid != keep_workflow_id)
+                ).fetchall()
+                orphan_ids = [row.workflow_uuid for row in rows]
+                if orphan_ids:
+                    conn.execute(
+                        sa.update(SystemSchema.workflow_status)
+                        .where(SystemSchema.workflow_status.c.workflow_uuid.in_(orphan_ids))
+                        .values(status="CANCELLED", updated_at=utc_now_epoch_ms())
+                    )
+                return orphan_ids
         finally:
             client.destroy()
 
@@ -506,8 +570,10 @@ class ConductorManager:
             )
             pending_workflow_ids = sorted(item.workflow_id for item in pending_workflows)
             if pending_workflow_ids != [workflow_id]:
+                other_ids = [pid for pid in pending_workflow_ids if pid != workflow_id]
                 raise RuntimeError(
-                    "Cannot execute staged fork while other pending workflows exist for the same executor/version"
+                    "Cannot execute staged fork while other pending workflows exist for the same executor/version: "
+                    + ", ".join(other_ids)
                 )
 
             return {
@@ -754,8 +820,24 @@ def _build_workflow_input_override(
         source_status.get("serialization"),
         serializer,
     )
-    args = tuple(workflow_inputs.get("args") or ())
-    kwargs = dict(workflow_input_override)
+    # Accept either the explicit {args, kwargs} shape (cross-language safe)
+    # or, for back-compat, treat any other dict as kwargs-only with the
+    # source workflow's positional args preserved.
+    if (
+        isinstance(workflow_input_override, dict)
+        and ("args" in workflow_input_override or "kwargs" in workflow_input_override)
+    ):
+        raw_args = workflow_input_override.get("args") or []
+        raw_kwargs = workflow_input_override.get("kwargs") or {}
+        if not isinstance(raw_args, (list, tuple)):
+            raise RuntimeError("workflow_input_override.args must be a JSON array")
+        if not isinstance(raw_kwargs, dict):
+            raise RuntimeError("workflow_input_override.kwargs must be a JSON object")
+        args = tuple(raw_args)
+        kwargs = dict(raw_kwargs)
+    else:
+        args = tuple(workflow_inputs.get("args") or ())
+        kwargs = dict(workflow_input_override)
     return _serialize_workflow_inputs(
         args,
         kwargs,

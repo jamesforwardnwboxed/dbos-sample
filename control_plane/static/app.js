@@ -12,18 +12,33 @@ function escAttr(s) {
   return String(s ?? '').replace(/'/g, "\\'");
 }
 
+// Parse an ISO 8601 string OR an epoch-ms value (number or numeric string,
+// as DBOS returns CreatedAt/UpdatedAt as stringified epoch ms).
+function toDate(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (value instanceof Date) return value;
+  if (typeof value === 'number') return new Date(value);
+  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) {
+    return new Date(Number(value));
+  }
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 function relTime(iso) {
-  if (!iso) return '—';
-  const delta = (Date.now() - new Date(iso).getTime()) / 1000;
+  const d = toDate(iso);
+  if (!d) return '—';
+  const delta = (Date.now() - d.getTime()) / 1000;
   if (delta < 2)    return 'just now';
   if (delta < 60)   return `${Math.floor(delta)}s ago`;
   if (delta < 3600) return `${Math.floor(delta / 60)}m ago`;
-  return new Date(iso).toLocaleTimeString();
+  return d.toLocaleTimeString();
 }
 
 function clockStamp(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleTimeString('en-GB', {
+  const d = toDate(iso);
+  if (!d) return '—';
+  return d.toLocaleTimeString('en-GB', {
     hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
 }
@@ -37,15 +52,19 @@ const BADGE_MAP = {
   succeeded:        'green',
   ready:            'green',
   COMPLETE:         'green',
+  SUCCESS:          'green',
   PENDING:          'amber',
   ENQUEUED:         'sky',
+  DELAYED:          'sky',
   sent:             'sky',
   connecting:       'amber',
   RETRIES_EXCEEDED: 'red',
+  MAX_RECOVERY_ATTEMPTS_EXCEEDED: 'red',
   ERROR:            'red',
   failed:           'red',
   timed_out:        'amber',
   CANCELLED:        'slate',
+  cancelled:        'slate',
   queued:           'slate',
   closed:           'slate',
 };
@@ -58,7 +77,7 @@ function badge(status) {
 function dirIcon(dir) {
   if (dir === 'inbound')  return `<span class="ev-dir ev-dir-in"  title="inbound">←</span>`;
   if (dir === 'outbound') return `<span class="ev-dir ev-dir-out" title="outbound">→</span>`;
-  return `<span class="ev-dir ev-dir-sys" title="system">·</span>`;
+  return `<span class="ev-dir ev-dir-sys" title="system">◆</span>`;
 }
 
 function renderConnection(state) {
@@ -100,8 +119,14 @@ function renderSession(state) {
   const info = s.executor_info ?? {};
 
   $('sess-app').textContent          = s.app_name || '—';
-  $('sess-executor-id').textContent  = info.executor_id || '—';
-  $('sess-app-version').textContent  = info.application_version || '—';
+
+  const execEl = $('sess-executor-id');
+  execEl.textContent = truncId(info.executor_id);
+  execEl.title       = info.executor_id || '';
+
+  const verEl = $('sess-app-version');
+  verEl.textContent  = truncId(info.application_version);
+  verEl.title        = info.application_version || '';
 
   const sesEl = $('sess-session-id');
   sesEl.textContent  = truncId(s.session_id);

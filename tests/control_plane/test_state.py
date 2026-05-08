@@ -792,6 +792,14 @@ async def test_run_edited_fork_stages_then_executes(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(manager, "execute_staged_fork", fake_execute)
 
+    cancel_orphan_calls: list[tuple[str, str, str]] = []
+
+    def fake_cancel_orphans(keep_workflow_id, executor_id, application_version):
+        cancel_orphan_calls.append((keep_workflow_id, executor_id, application_version))
+        return ["wf-orphan-1"]
+
+    monkeypatch.setattr(manager, "_cancel_orphan_staged_forks_sync", fake_cancel_orphans)
+
     record = await manager.run_edited_fork(
         "wf-1",
         0,
@@ -800,6 +808,7 @@ async def test_run_edited_fork_stages_then_executes(monkeypatch: pytest.MonkeyPa
     )
 
     assert execute_calls == ["wf-staged"]
+    assert cancel_orphan_calls == [("wf-staged", "executor-1", "v1")]
     assert record.message_type == "run_edited_fork"
     payload = record.response_payload
     assert payload["new_workflow_id"] == "wf-staged"
@@ -808,6 +817,7 @@ async def test_run_edited_fork_stages_then_executes(monkeypatch: pytest.MonkeyPa
     assert payload["execute_status"] == "succeeded"
     assert payload["requires_manual_execution"] is False
     assert payload["stage_mode"] == "run_edited_fork"
+    assert payload["cancelled_orphan_staged_forks"] == ["wf-orphan-1"]
 
 
 def test_validate_execute_staged_fork_sync_rejects_other_pending_workflows(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -848,6 +858,162 @@ def test_validate_execute_staged_fork_sync_rejects_other_pending_workflows(monke
         manager._validate_execute_staged_fork_sync("wf-staged", "executor-1", "v1")
 
     assert "other pending workflows exist" in str(exc_info.value)
+    assert "wf-other" in str(exc_info.value)
+
+
+def test_cancel_orphan_staged_forks_sync_cancels_other_pending_forks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = ConductorManager(
+        app_name="dbos-starter",
+        conductor_key="local-conductor-key",
+        system_database_url="postgres://postgres:dbos@postgres:5432/dbos_starter",
+    )
+
+    captured: dict[str, object] = {
+        "fetchone_results": [],
+        "fetchall_results": [
+            [SimpleNamespace(workflow_uuid="wf-orphan-1"), SimpleNamespace(workflow_uuid="wf-orphan-2")],
+        ],
+    }
+
+    class DummyClient:
+        def __init__(self, system_database_url: str) -> None:
+            self._sys_db = SimpleNamespace(
+                engine=SimpleNamespace(begin=lambda: _DummyBeginContext(captured)),
+            )
+
+        def destroy(self) -> None:
+            captured["destroyed"] = True
+
+    monkeypatch.setattr("control_plane.state.DBOSClient", DummyClient)
+
+    cancelled = manager._cancel_orphan_staged_forks_sync("wf-keep", "executor-1", "v1")
+
+    assert cancelled == ["wf-orphan-1", "wf-orphan-2"]
+    assert captured["destroyed"] is True
+    # Statements: (1) SELECT for orphan ids, (2) UPDATE to CANCELLED.
+    statements = captured["statements"]
+    assert len(statements) == 2
+    assert statements[1].compile().params["status"] == "CANCELLED"
+
+
+def test_cancel_orphan_staged_forks_sync_no_orphans_skips_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = ConductorManager(
+        app_name="dbos-starter",
+        conductor_key="local-conductor-key",
+        system_database_url="postgres://postgres:dbos@postgres:5432/dbos_starter",
+    )
+
+    captured: dict[str, object] = {
+        "fetchone_results": [],
+        "fetchall_results": [[]],
+    }
+
+    class DummyClient:
+        def __init__(self, system_database_url: str) -> None:
+            self._sys_db = SimpleNamespace(
+                engine=SimpleNamespace(begin=lambda: _DummyBeginContext(captured)),
+            )
+
+        def destroy(self) -> None:
+            return None
+
+    monkeypatch.setattr("control_plane.state.DBOSClient", DummyClient)
+
+    cancelled = manager._cancel_orphan_staged_forks_sync("wf-keep", "executor-1", "v1")
+
+    assert cancelled == []
+    # Only the SELECT statement runs; no UPDATE when there's nothing to cancel.
+    assert len(captured["statements"]) == 1
+
+
+def test_stage_edited_fork_sync_cancels_forked_workflow_when_override_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If override application raises after fork_workflow has committed, the
+    forked workflow must be marked CANCELLED so we don't leave a runnable
+    fork without its intended overrides applied."""
+    manager = ConductorManager(
+        app_name="dbos-starter",
+        conductor_key="local-conductor-key",
+        system_database_url="postgres://postgres:dbos@postgres:5432/dbos_starter",
+    )
+
+    source_status = {
+        "status": "ERROR",
+        "name": "dbos_workflow",
+        "queue_name": None,
+        "app_version": "v1",
+        "parent_workflow_id": None,
+        "inputs": "serialized-inputs",
+        "serialization": "py_pickle",
+    }
+
+    captured: dict[str, object] = {"fork_calls": []}
+
+    # The first engine.begin() (override block) will raise on first execute.
+    # The second engine.begin() (cleanup) must succeed and run a CANCELLED
+    # update.
+    class _RaisingConn:
+        def __init__(self, captured: dict[str, object]) -> None:
+            self.captured = captured
+
+        def execute(self, statement):
+            self.captured.setdefault("override_attempts", []).append(statement)
+            raise ValueError("simulated override failure")
+
+    class _RaisingBegin:
+        def __init__(self, captured: dict[str, object]) -> None:
+            self.captured = captured
+
+        def __enter__(self):
+            return _RaisingConn(self.captured)
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    begin_calls = {"count": 0}
+
+    def begin():
+        begin_calls["count"] += 1
+        if begin_calls["count"] == 1:
+            return _RaisingBegin(captured)
+        return _DummyBeginContext(captured)
+
+    class DummyClient:
+        def __init__(self, system_database_url: str) -> None:
+            self._serializer = object()
+            self._sys_db = SimpleNamespace(
+                get_workflow_status=lambda workflow_id: source_status,
+                fork_workflow=lambda original_ids, forked_ids, start_steps, application_version, queue_name=None: captured["fork_calls"].append(forked_ids[0]),
+                engine=SimpleNamespace(begin=begin),
+            )
+
+        def destroy(self) -> None:
+            captured["destroyed"] = True
+
+    monkeypatch.setattr("control_plane.state.DBOSClient", DummyClient)
+
+    with pytest.raises(ValueError, match="simulated override failure"):
+        manager._stage_edited_fork_sync(
+            "wf-1",
+            0,
+            {"name": "Ada"},
+            None,
+            "wf-fork",
+            "executor-1",
+            "v1",
+        )
+
+    # fork_workflow ran; cleanup ran a CANCELLED update on the forked id.
+    assert captured["fork_calls"] == ["wf-fork"]
+    cleanup_statements = captured["statements"]
+    assert len(cleanup_statements) == 1
+    assert cleanup_statements[0].compile().params["status"] == "CANCELLED"
+    assert captured["destroyed"] is True
 
 
 @pytest.mark.asyncio
@@ -902,6 +1068,10 @@ class _DummyConnection:
         assert isinstance(statement, sa.sql.Executable)
         self.captured.setdefault("statements", []).append(statement)
         is_select = getattr(statement, "is_select", False)
+        fetchall_results = self.captured.get("fetchall_results")
+        if is_select and isinstance(fetchall_results, list) and fetchall_results:
+            rows = fetchall_results.pop(0)
+            return SimpleNamespace(fetchall=lambda: rows, fetchone=lambda: (rows[0] if rows else None), rowcount=len(rows))
         fetchone_results = self.captured.get("fetchone_results")
         if is_select and isinstance(fetchone_results, list) and fetchone_results:
             row = fetchone_results.pop(0)
@@ -909,4 +1079,4 @@ class _DummyConnection:
         rowcounts = self.captured.get("rowcounts")
         if isinstance(rowcounts, list) and rowcounts:
             return SimpleNamespace(rowcount=rowcounts.pop(0))
-        return SimpleNamespace(rowcount=1, fetchone=lambda: None)
+        return SimpleNamespace(rowcount=1, fetchone=lambda: None, fetchall=lambda: [])

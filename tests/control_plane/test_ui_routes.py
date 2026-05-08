@@ -231,7 +231,7 @@ def test_http_routes_delegate_to_manager() -> None:
         assert queued_response.json()["request_id"] == "req-queued"
         assert workflow_response.status_code == 200
         assert workflow_response.json()["request_id"] == "req-get"
-        assert workflow_response.json()["workflow_input_seed"] == {"name": "world"}
+        assert workflow_response.json()["workflow_input_seed"] == {"args": [], "kwargs": {"name": "world"}}
         assert steps_response.status_code == 200
         assert steps_response.json()["request_id"] == "req-steps"
         assert recovery_response.status_code == 200
@@ -533,3 +533,46 @@ def test_fork_route_validates_start_step() -> None:
         assert missing_response.json()["detail"] == "start_step is required"
         assert invalid_response.status_code == 400
         assert invalid_response.json()["detail"] == "start_step must be an integer"
+
+
+def test_derive_input_override_seed_python_repr() -> None:
+    from control_plane.routes import _derive_input_override_seed
+
+    seed = _derive_input_override_seed(
+        {"Input": "{'args': ('x', 'y'), 'kwargs': {'name': 'world'}}"}
+    )
+    assert seed == {"args": ["x", "y"], "kwargs": {"name": "world"}}
+
+
+def test_derive_input_override_seed_portable_json() -> None:
+    from control_plane.routes import _derive_input_override_seed
+
+    seed = _derive_input_override_seed(
+        {"Input": '{"positionalArgs": ["x", 1], "namedArgs": {"k": "v"}}'}
+    )
+    assert seed == {"args": ["x", 1], "kwargs": {"k": "v"}}
+
+
+def test_derive_input_override_seed_json_args_kwargs() -> None:
+    from control_plane.routes import _derive_input_override_seed
+
+    seed = _derive_input_override_seed(
+        {"Input": '{"args": [1, 2], "kwargs": {"foo": "bar"}}'}
+    )
+    assert seed == {"args": [1, 2], "kwargs": {"foo": "bar"}}
+
+
+def test_derive_input_override_seed_legacy_flat_kwargs() -> None:
+    from control_plane.routes import _derive_input_override_seed
+
+    seed = _derive_input_override_seed({"Input": '{"name": "world"}'})
+    assert seed == {"args": [], "kwargs": {"name": "world"}}
+
+
+def test_derive_input_override_seed_invalid_returns_none() -> None:
+    from control_plane.routes import _derive_input_override_seed
+
+    assert _derive_input_override_seed({"Input": "not parseable"}) is None
+    assert _derive_input_override_seed({"Input": ""}) is None
+    assert _derive_input_override_seed({}) is None
+    assert _derive_input_override_seed(None) is None

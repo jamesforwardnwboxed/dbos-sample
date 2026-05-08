@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,17 @@ def _validate_step_output_overrides(value: Any) -> dict[str, Any]:
 
 
 def _derive_input_override_seed(workflow_output: Any) -> dict[str, Any] | None:
+    """Derive an editable input seed from a workflow's recorded Input.
+
+    DBOS apps in different languages serialize workflow inputs differently:
+      - Python (pickle):  "{'args': (...), 'kwargs': {...}}" (Python repr)
+      - Portable JSON:    '{"positionalArgs": [...], "namedArgs": {...}}'
+      - Plain JSON kwargs: '{"name": "x"}' (legacy / direct dict)
+
+    This function normalizes any of those into the editable shape
+    {"args": [...], "kwargs": {...}} so the UI can edit both positional and
+    named arguments regardless of the source language.
+    """
     if not isinstance(workflow_output, dict):
         return None
 
@@ -33,19 +45,36 @@ def _derive_input_override_seed(workflow_output: Any) -> dict[str, Any] | None:
     if not isinstance(raw_input, str) or not raw_input.strip():
         return None
 
+    parsed_input: Any = None
+    # Try JSON first (TS / Go / Java SDKs and portable JSON serializer).
     try:
-        parsed_input = ast.literal_eval(raw_input)
-    except (ValueError, SyntaxError):
-        return None
+        parsed_input = json.loads(raw_input)
+    except (ValueError, TypeError):
+        # Fall back to Python literal_eval (Python pickle->repr round-trip).
+        try:
+            parsed_input = ast.literal_eval(raw_input)
+        except (ValueError, SyntaxError):
+            return None
 
     if not isinstance(parsed_input, dict):
         return None
 
-    kwargs = parsed_input.get("kwargs")
-    if isinstance(kwargs, dict):
-        return kwargs
+    # Portable JSON shape (cross-language)
+    if "positionalArgs" in parsed_input or "namedArgs" in parsed_input:
+        args = parsed_input.get("positionalArgs") or []
+        kwargs = parsed_input.get("namedArgs") or {}
+        if isinstance(args, (list, tuple)) and isinstance(kwargs, dict):
+            return {"args": list(args), "kwargs": kwargs}
 
-    return parsed_input
+    # Python pickle-deserialized shape
+    if "args" in parsed_input or "kwargs" in parsed_input:
+        args = parsed_input.get("args") or []
+        kwargs = parsed_input.get("kwargs") or {}
+        if isinstance(args, (list, tuple)) and isinstance(kwargs, dict):
+            return {"args": list(args), "kwargs": kwargs}
+
+    # Legacy: treat the whole dict as kwargs.
+    return {"args": [], "kwargs": parsed_input}
 
 router = APIRouter()
 
