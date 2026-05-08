@@ -23,13 +23,13 @@ class ExampleImpl implements Example {
   }
 
   private int stepOne(String name) {
-    logger.debug("Hello {}", name);
-    logger.debug("Step one completed");
+    logger.info("Hello {}", name);
+    logger.info("Step one completed");
     return name.length();
   }
 
   private void stepTwo(String name, int nameLength) {
-    logger.debug("Step two completed for {}; the name has {} characters.", name, nameLength);
+    logger.info("Step two completed for {}; the name has {} characters.", name, nameLength);
   }
 
   @Override
