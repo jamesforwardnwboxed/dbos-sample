@@ -373,6 +373,7 @@ function renderForkSteps() {
   const { boundaries, selectedStep } = forkState;
   const list = $('fork-step-list');
   const empty = $('fork-steps-empty');
+  const inputOverrideField = $('fork-input-override');
   const overrideRaw = $('fork-input-override').value.trim();
   const hasOverride = overrideRaw.length > 0;
 
@@ -435,12 +436,15 @@ function renderForkSteps() {
 
   if (selectedStep !== null) {
     const isRestart = selectedStep === 0;
+    inputOverrideField.disabled = !isRestart;
     if (hasOverride) {
-      submitLabel.textContent = 'Stage edited fork';
-      submitBtn.disabled = !isRestart;
+      submitLabel.textContent = isRestart
+        ? 'Stage edited fork'
+        : `Fork from step ${selectedStep}`;
+      submitBtn.disabled = false;
       $('fork-override-help').textContent = isRestart
         ? 'Workflow input edits apply only to a step 0 restart. Preserved checkpoint edits below still apply to completed steps before the selected boundary.'
-        : 'Workflow input edits only apply to a staged full restart from step 0. Clear the input override or select step 0.';
+        : 'Workflow input edits only apply to a staged full restart from step 0. The input override field is preserved but ignored until you select step 0.';
     } else {
       submitLabel.textContent = isRestart
         ? 'Stage restart from step 0'
@@ -449,6 +453,7 @@ function renderForkSteps() {
       $('fork-override-help').textContent = 'Edited recovery stages a new PENDING fork for review. You can edit workflow input only on restart, and edit preserved checkpoint outputs for steps before the selected fork boundary.';
     }
   } else {
+    inputOverrideField.disabled = true;
     submitLabel.textContent = 'Fork';
     submitBtn.disabled = true;
     $('fork-override-help').textContent = 'Edited recovery stages a new PENDING fork for review. You can edit workflow input only on restart, and edit preserved checkpoint outputs for steps before the selected fork boundary.';
@@ -529,6 +534,7 @@ async function openForkModal(workflowId) {
   $('fork-submit-label').textContent  = 'Fork';
   $('fork-new-id').value = '';
   $('fork-input-override').value = '';
+  $('fork-input-override').disabled = true;
   $('fork-override-help').textContent = 'Edited recovery stages a new PENDING fork for review. You can edit workflow input only on restart, and edit preserved checkpoint outputs for steps before the selected fork boundary.';
   $('fork-source-status').textContent = '—';
   $('fork-cancel-original-row').hidden = true;
@@ -618,7 +624,7 @@ $('fork-submit-btn').addEventListener('click', async () => {
   const body  = { workflow_id: workflowId, start_step: selectedStep };
   if (newId) body.new_workflow_id = newId;
 
-  if (overrideText) {
+  if (overrideText && selectedStep === 0) {
     let parsedOverride;
     try {
       parsedOverride = JSON.parse(overrideText);

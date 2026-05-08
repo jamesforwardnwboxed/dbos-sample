@@ -34,6 +34,10 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+[hidden] {
+  display: none !important;
+}
+
 html {
   background: var(--bg);
 }
@@ -605,6 +609,7 @@ button {
   align-items: center;
   justify-content: center;
   padding: 24px;
+  overflow: auto;
 }
 
 .inspect-backdrop,
@@ -635,9 +640,10 @@ button {
 
 .fork-box {
   max-width: 920px;
-  max-height: 88vh;
+  max-height: min(88vh, 980px);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .inspect-head,
@@ -758,9 +764,9 @@ button {
 }
 
 .fork-steps-area {
-  flex: 1;
+  flex: 1 1 auto;
   overflow-y: auto;
-  min-height: 160px;
+  min-height: 0;
   background: rgba(255, 253, 249, 0.52);
 }
 
@@ -905,7 +911,8 @@ button {
 .fork-foot {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 20px;
+  align-items: end;
+  gap: 16px;
   padding: 20px;
   background: rgba(247, 243, 235, 0.6);
 }
@@ -974,6 +981,14 @@ button {
   max-width: none;
 }
 
+.fork-foot-right {
+  align-self: stretch;
+}
+
+.fork-foot-right .btn {
+  min-height: 44px;
+}
+
 .fork-post-stage {
   display: flex;
   align-items: center;
@@ -981,10 +996,24 @@ button {
   gap: 16px;
   padding: 16px 20px;
   background: rgba(229, 242, 235, 0.72);
+  flex-shrink: 0;
 }
 
 .fork-post-stage-title {
   color: var(--green);
+}
+
+@media (max-height: 860px) {
+  #inspect-overlay,
+  #fork-overlay {
+    align-items: flex-start;
+  }
+
+  .fork-box,
+  .inspect-box {
+    margin-top: 16px;
+    margin-bottom: 16px;
+  }
 }
 
 @media (max-width: 1000px) {
@@ -1003,9 +1032,18 @@ button {
   .fork-foot {
     grid-template-columns: 1fr;
   }
+
+  .fork-foot-right {
+    align-self: auto;
+  }
 }
 
 @media (max-width: 720px) {
+  #inspect-overlay,
+  #fork-overlay {
+    padding: 14px;
+  }
+
   .topbar {
     padding: 12px 16px;
   }
@@ -1035,6 +1073,7 @@ button {
   .fork-box,
   .inspect-box {
     max-height: 92vh;
+    border-radius: 18px;
   }
 
   .fork-status-row,
@@ -1070,5 +1109,20 @@ button {
   .fork-step-indicator {
     grid-column: 2;
     padding-right: 0;
+  }
+
+  .fork-foot-right {
+    width: 100%;
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .fork-post-stage-actions {
+    width: 100%;
+  }
+
+  .fork-post-stage-actions .btn,
+  .fork-foot-right .btn {
+    width: 100%;
   }
 }
