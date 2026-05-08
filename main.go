@@ -88,12 +88,13 @@ func workflow(ctx dbos.DBOSContext, name string) (string, error) {
 }
 
 func stepOne(ctx context.Context, name string) (int, error) {
-	logger.Debug("step one completed", "name", name)
+	logger.Info("hello", "name", name)
+	logger.Info("step one completed")
 	return len(name), nil
 }
 
 func stepTwo(ctx context.Context, name string, nameLength int) (string, error) {
-	logger.Debug("step two completed", "name", name, "name_length", nameLength)
+	logger.Info("step two completed", "name", name, "name_length", nameLength)
 	return "ok", nil
 }
 
