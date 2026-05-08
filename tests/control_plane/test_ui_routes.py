@@ -16,6 +16,7 @@ class FakeManager:
     def __init__(self) -> None:
         self.last_fork_call = None
         self.last_stage_edited_fork_call = None
+        self.last_run_edited_fork_call = None
         self.last_execute_staged_fork_call = None
 
     async def snapshot(self):
@@ -123,6 +124,35 @@ class FakeManager:
                 "new_workflow_id": new_workflow_id or "generated-override-id",
                 "stage_mode": "edited_fork",
                 "requires_manual_execution": True,
+            },
+        )
+
+    async def run_edited_fork(
+        self,
+        workflow_id,
+        start_step,
+        *,
+        workflow_input_override=None,
+        step_output_overrides=None,
+        new_workflow_id=None,
+        cancel_original_if_active=False,
+    ):
+        self.last_run_edited_fork_call = {
+            "workflow_id": workflow_id,
+            "start_step": start_step,
+            "workflow_input_override": workflow_input_override,
+            "step_output_overrides": step_output_overrides,
+            "new_workflow_id": new_workflow_id,
+            "cancel_original_if_active": cancel_original_if_active,
+        }
+        return FakeRecord(
+            request_id="req-run",
+            status="succeeded",
+            response_payload={
+                "new_workflow_id": new_workflow_id or "generated-run-id",
+                "stage_mode": "run_edited_fork",
+                "execution_requested": True,
+                "requires_manual_execution": False,
             },
         )
 
@@ -339,6 +369,59 @@ def test_fork_route_uses_local_staged_edit_flow_for_checkpoint_override() -> Non
             "cancel_original_if_active": True,
         }
         assert manager.last_fork_call is None
+
+
+def test_fork_route_run_mode_dispatches_to_run_edited_fork() -> None:
+    app = create_control_plane_app()
+    manager = FakeManager()
+    app.state.conductor_manager = manager
+
+    with create_control_plane_client().__class__(app) as client:
+        response = client.post(
+            "/api/control-plane/fork",
+            json={
+                "workflow_id": "wf-1",
+                "start_step": 0,
+                "mode": "run",
+                "workflow_input_override": {"name": "Ada"},
+                "cancel_original_if_active": True,
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["request_id"] == "req-run"
+        assert body["response"]["execution_requested"] is True
+        assert body["response"]["stage_mode"] == "run_edited_fork"
+        assert manager.last_run_edited_fork_call == {
+            "workflow_id": "wf-1",
+            "start_step": 0,
+            "workflow_input_override": {"name": "Ada"},
+            "step_output_overrides": None,
+            "new_workflow_id": None,
+            "cancel_original_if_active": True,
+        }
+        assert manager.last_stage_edited_fork_call is None
+
+
+def test_fork_route_rejects_unknown_mode() -> None:
+    app = create_control_plane_app()
+    manager = FakeManager()
+    app.state.conductor_manager = manager
+
+    with create_control_plane_client().__class__(app) as client:
+        response = client.post(
+            "/api/control-plane/fork",
+            json={
+                "workflow_id": "wf-1",
+                "start_step": 0,
+                "mode": "magic",
+                "workflow_input_override": {"name": "Ada"},
+            },
+        )
+
+        assert response.status_code == 400
+        assert "mode" in response.json()["detail"]
 
 
 def test_fork_route_returns_not_found_for_missing_override_source() -> None:

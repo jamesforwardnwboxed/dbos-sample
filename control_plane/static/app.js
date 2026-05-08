@@ -276,11 +276,16 @@ let forkState = {
   boundaries: [],
   selectedStep: null,
   workflowInputText: '',
+  workflowInputSeed: '',
   stepOutputEdits: {},
   sourceStatus: null,
   sourceIsActive: false,
   stagedWorkflowId: null,
 };
+
+function workflowInputEdited() {
+  return $('fork-input-override').value.trim() !== (forkState.workflowInputSeed || '').trim();
+}
 
 function resetForkPostStage() {
   forkState.stagedWorkflowId = null;
@@ -369,19 +374,34 @@ function forkStepBadge(step) {
   return badge('PENDING');
 }
 
+function describeForkSelection(step) {
+  if (!step) return 'Select where the fork should resume.';
+  const fid = step.function_id ?? 0;
+  if (fid === 0) {
+    return 'Selected rerun point: restart the workflow from the beginning.';
+  }
+  if (step.boundary_type === 'next') {
+    return `Selected rerun point: start at step ${fid}, after ${step.prior_step_name || `step ${fid - 1}`}.`;
+  }
+  return `Selected rerun point: re-run from step ${fid} (${step.function_name || 'unnamed step'}).`;
+}
+
 function renderForkSteps() {
   const { boundaries, selectedStep } = forkState;
   const list = $('fork-step-list');
   const empty = $('fork-steps-empty');
   const inputOverrideField = $('fork-input-override');
-  const overrideRaw = $('fork-input-override').value.trim();
-  const hasOverride = overrideRaw.length > 0;
+  const hasOverride = workflowInputEdited();
+  const selectedBoundary = boundaries.find((step) => (step.function_id ?? null) === selectedStep) || null;
+
+  $('fork-selection-summary').textContent = describeForkSelection(selectedBoundary);
 
   if (!boundaries.length) {
     $('fork-steps-hint-text').textContent = 'No fork boundaries available for this workflow.';
     empty.style.display = 'flex';
     list.style.display  = 'none';
     $('fork-submit-btn').disabled = true;
+    $('fork-selection-summary').textContent = 'No fork boundaries available for this workflow.';
     renderForkStepOverrides();
     return;
   }
@@ -405,19 +425,20 @@ function renderForkSteps() {
     const durText   = dur !== null ? `${dur}ms` : '';
     const tsText    = ts ? ts : '';
     const metaText  = [tsText, durText].filter(Boolean).join(' · ');
+    const stepLabel = fid === 0 ? 'restart' : `step ${fid}`;
     const restartNote = fid === 0
-      ? ' <span class="fork-step-note" style="color:var(--text-3)">≡ restart</span>'
+      ? ' <span class="fork-step-note">full restart</span>'
       : (step.synthetic
-        ? ' <span class="fork-step-note" style="color:var(--text-3)">next boundary</span>'
+        ? ' <span class="fork-step-note">resume after prior step</span>'
         : '');
 
     const indicatorText = isFork
-      ? (hasOverride && fid === 0 ? '✎ staged edited restart' : '↻ staged fork')
+      ? 'selected rerun point'
       : (isPreserved ? '✓ preserved' : '');
 
     return `<div class="fork-step ${stateClass}" onclick="forkSelectStep(${fid})">
       <div class="fork-step-num">
-        <div class="fork-step-node">${fid}</div>
+        <div class="fork-step-node">${escHtml(stepLabel)}</div>
       </div>
       <div class="fork-step-body">
         <div class="fork-step-name">${escHtml(step.function_name || '—')}</div>
@@ -433,30 +454,32 @@ function renderForkSteps() {
 
   const submitBtn   = $('fork-submit-btn');
   const submitLabel = $('fork-submit-label');
+  const runBtn      = $('fork-run-btn');
+  const runLabel    = $('fork-run-label');
 
   if (selectedStep !== null) {
-    const isRestart = selectedStep === 0;
-    inputOverrideField.disabled = !isRestart;
+    inputOverrideField.disabled = false;
+    submitBtn.disabled = false;
+    runBtn.disabled = false;
     if (hasOverride) {
-      submitLabel.textContent = isRestart
-        ? 'Stage edited fork'
-        : `Fork from step ${selectedStep}`;
-      submitBtn.disabled = false;
-      $('fork-override-help').textContent = isRestart
-        ? 'Workflow input edits apply only to a step 0 restart. Preserved checkpoint edits below still apply to completed steps before the selected boundary.'
-        : 'Workflow input edits only apply to a staged full restart from step 0. The input override field is preserved but ignored until you select step 0.';
+      submitLabel.textContent = 'Stage edited fork';
+      runLabel.textContent = 'Run edited fork now';
     } else {
-      submitLabel.textContent = isRestart
+      submitLabel.textContent = selectedStep === 0
         ? 'Stage restart from step 0'
-        : `Fork from step ${selectedStep}`;
-      submitBtn.disabled = false;
-      $('fork-override-help').textContent = 'Edited recovery stages a new PENDING fork for review. You can edit workflow input only on restart, and edit preserved checkpoint outputs for steps before the selected fork boundary.';
+        : `Stage fork from step ${selectedStep}`;
+      runLabel.textContent = selectedStep === 0
+        ? 'Restart now'
+        : `Fork & run from step ${selectedStep}`;
     }
+    $('fork-override-help').textContent = 'Edited recovery stages a new PENDING fork for review. You can edit workflow input and preserved checkpoint outputs before executing the fork.';
   } else {
     inputOverrideField.disabled = true;
-    submitLabel.textContent = 'Fork';
+    submitLabel.textContent = 'Stage fork';
+    runLabel.textContent = 'Run now';
     submitBtn.disabled = true;
-    $('fork-override-help').textContent = 'Edited recovery stages a new PENDING fork for review. You can edit workflow input only on restart, and edit preserved checkpoint outputs for steps before the selected fork boundary.';
+    runBtn.disabled = true;
+    $('fork-override-help').textContent = 'Edited recovery stages a new PENDING fork for review. You can edit workflow input and preserved checkpoint outputs before executing the fork.';
   }
 
   renderForkStepOverrides();
@@ -520,6 +543,7 @@ async function openForkModal(workflowId) {
     boundaries: [],
     selectedStep: null,
     workflowInputText: '',
+    workflowInputSeed: '',
     stepOutputEdits: {},
     sourceStatus: null,
     sourceIsActive: false,
@@ -531,11 +555,14 @@ async function openForkModal(workflowId) {
   $('fork-steps-empty').style.display = 'flex';
   $('fork-step-list').style.display   = 'none';
   $('fork-submit-btn').disabled = true;
-  $('fork-submit-label').textContent  = 'Fork';
+  $('fork-submit-label').textContent  = 'Stage fork';
+  $('fork-run-btn').disabled = true;
+  $('fork-run-label').textContent  = 'Run now';
+  $('fork-selection-summary').textContent = 'Select where the fork should resume.';
   $('fork-new-id').value = '';
   $('fork-input-override').value = '';
-  $('fork-input-override').disabled = true;
-  $('fork-override-help').textContent = 'Edited recovery stages a new PENDING fork for review. You can edit workflow input only on restart, and edit preserved checkpoint outputs for steps before the selected fork boundary.';
+  $('fork-input-override').disabled = false;
+  $('fork-override-help').textContent = 'Edited recovery stages a new PENDING fork for review. You can edit workflow input and preserved checkpoint outputs before executing the fork.';
   $('fork-source-status').textContent = '—';
   $('fork-cancel-original-row').hidden = true;
   $('fork-step-overrides-empty').hidden = false;
@@ -543,6 +570,7 @@ async function openForkModal(workflowId) {
   $('fork-step-overrides').querySelectorAll('.fork-step-edit-card').forEach((node) => node.remove());
   resetForkPostStage();
 
+  document.body.classList.add('modal-open');
   $('fork-overlay').style.display = 'flex';
 
   try {
@@ -562,7 +590,11 @@ async function openForkModal(workflowId) {
       if (inputSeed && typeof inputSeed === 'object' && !Array.isArray(inputSeed)) {
         const seededJson = JSON.stringify(inputSeed, null, 2);
         forkState.workflowInputText = seededJson;
+        forkState.workflowInputSeed = seededJson;
         $('fork-input-override').value = seededJson;
+      } else {
+        forkState.workflowInputSeed = '';
+        $('fork-input-override').value = '';
       }
     }
   } catch (_) {}
@@ -594,6 +626,7 @@ async function openForkModal(workflowId) {
 }
 
 function closeForkModal() {
+  document.body.classList.remove('modal-open');
   $('fork-overlay').style.display = 'none';
   resetForkPostStage();
 }
@@ -615,19 +648,19 @@ $('fork-execute-btn').addEventListener('click', async () => {
   } catch (_) {}
 });
 
-$('fork-submit-btn').addEventListener('click', async () => {
+async function submitForkWithMode(mode) {
   const { workflowId, selectedStep } = forkState;
   if (workflowId === null || selectedStep === null) return;
 
   const newId = $('fork-new-id').value.trim() || null;
-  const overrideText = $('fork-input-override').value.trim();
-  const body  = { workflow_id: workflowId, start_step: selectedStep };
+  const body  = { workflow_id: workflowId, start_step: selectedStep, mode };
   if (newId) body.new_workflow_id = newId;
 
-  if (overrideText && selectedStep === 0) {
+  if (workflowInputEdited()) {
+    const overrideText = $('fork-input-override').value.trim();
     let parsedOverride;
     try {
-      parsedOverride = JSON.parse(overrideText);
+      parsedOverride = overrideText ? JSON.parse(overrideText) : {};
     } catch (_) {
       const msg = $('action-msg');
       msg.hidden = false;
@@ -657,19 +690,27 @@ $('fork-submit-btn').addEventListener('click', async () => {
   if (Object.keys(stepOutputOverrides).length > 0) {
     body.step_output_overrides = stepOutputOverrides;
   }
-  if (body.workflow_input_override || body.step_output_overrides) {
-    body.cancel_original_if_active = forkState.sourceIsActive && $('fork-cancel-original').checked;
+
+  // Always go through the staged-fork path so the websocket cancel + edit
+  // semantics are consistent. If no edits/overrides are present, send an
+  // empty step_output_overrides marker to force the staged path.
+  if (!body.workflow_input_override && !body.step_output_overrides) {
+    body.step_output_overrides = {};
   }
+  body.cancel_original_if_active = forkState.sourceIsActive && $('fork-cancel-original').checked;
 
   try {
-    const response = await callApi('/api/control-plane/fork', body, 'fork_workflow');
-    if (body.workflow_input_override || body.step_output_overrides) {
+    const response = await callApi('/api/control-plane/fork', body, `fork_workflow (${mode})`);
+    if (mode === 'stage') {
       showForkPostStage(response.response);
       return;
     }
     closeForkModal();
   } catch (_) {}
-});
+}
+
+$('fork-submit-btn').addEventListener('click', () => submitForkWithMode('stage'));
+$('fork-run-btn').addEventListener('click', () => submitForkWithMode('run'));
 
 $('btn-list-workflows').addEventListener('click', () =>
   callApi('/api/control-plane/list-workflows', {}, 'list_workflows'),

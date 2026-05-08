@@ -258,8 +258,13 @@ async def fork_workflow(
     step_output_overrides = data.get("step_output_overrides")
 
     if workflow_input_override is not None or step_output_overrides is not None:
+        mode = data.get("mode", "stage")
+        if mode not in ("stage", "run"):
+            raise HTTPException(status_code=400, detail="mode must be 'stage' or 'run'")
+        manager = request.app.state.conductor_manager
+        method = manager.run_edited_fork if mode == "run" else manager.stage_edited_fork
         try:
-            record = await request.app.state.conductor_manager.stage_edited_fork(
+            record = await method(
                 workflow_id,
                 parsed_start_step,
                 workflow_input_override=(

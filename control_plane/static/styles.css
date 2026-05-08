@@ -54,6 +54,10 @@ body {
   line-height: 1.55;
 }
 
+body.modal-open {
+  overflow: hidden;
+}
+
 button,
 input,
 textarea {
@@ -610,6 +614,7 @@ button {
   justify-content: center;
   padding: 24px;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .inspect-backdrop,
@@ -643,7 +648,8 @@ button {
   max-height: min(88vh, 980px);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .inspect-head,
@@ -764,8 +770,8 @@ button {
 }
 
 .fork-steps-area {
-  flex: 1 1 auto;
-  overflow-y: auto;
+  flex: 0 0 auto;
+  overflow: visible;
   min-height: 0;
   background: rgba(255, 253, 249, 0.52);
 }
@@ -815,8 +821,9 @@ button {
 }
 
 .fork-step-node {
-  width: 30px;
-  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0 8px;
   border-radius: 999px;
   border: 1px solid var(--border-strong);
   background: rgba(255, 255, 255, 0.82);
@@ -826,6 +833,9 @@ button {
   font-size: 10px;
   font-weight: 500;
   color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 .fork-step-body {
@@ -877,7 +887,7 @@ button {
 }
 
 .fork-step.is-fork-point::before {
-  content: 'fork starts here';
+  content: 'selected rerun point';
   position: absolute;
   left: 76px;
   right: 20px;
@@ -922,6 +932,16 @@ button {
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+}
+
+.fork-selection-summary {
+  margin-bottom: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text-2);
+  font-size: 12px;
 }
 
 .fork-input {

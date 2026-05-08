@@ -170,7 +170,7 @@
         <span class="fork-explainer-icon">✎</span>
         <span id="fork-override-help">
           Edited recovery stages a new <strong>PENDING</strong> fork for review. You can edit
-          workflow input only when restarting from step 0, and edit preserved checkpoint outputs
+          workflow input and preserved checkpoint outputs
           for completed steps before the selected fork boundary.
         </span>
       </div>
@@ -201,6 +201,7 @@
 
       <div class="fork-foot">
         <div class="fork-foot-left">
+          <div class="fork-selection-summary" id="fork-selection-summary">Select where the fork should resume.</div>
           <label class="fork-new-id-label" for="fork-new-id">New workflow ID</label>
           <input
             type="text"
@@ -229,7 +230,11 @@
           <button class="btn" id="fork-cancel-btn">Cancel</button>
           <button class="btn btn-fork" id="fork-submit-btn" disabled>
             <span class="btn-icon">⑂</span>
-            <span id="fork-submit-label">Fork</span>
+            <span id="fork-submit-label">Stage fork</span>
+          </button>
+          <button class="btn btn-fork" id="fork-run-btn" disabled>
+            <span class="btn-icon">▶</span>
+            <span id="fork-run-label">Run now</span>
           </button>
         </div>
       </div>

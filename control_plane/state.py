@@ -251,6 +251,17 @@ class ConductorManager:
         cancel_original_if_active: bool = False,
     ) -> ConductorRequestRecord:
         executor_id, application_version = await self._require_ready_executor_target()
+
+        # Cancel the original via the same websocket cancel command the UI Cancel
+        # button uses, BEFORE we fork. This avoids racing the executor.
+        source_cancelled = False
+        if cancel_original_if_active:
+            try:
+                cancel_record = await self.send_cancel(workflow_id)
+                source_cancelled = cancel_record.status == "succeeded"
+            except RuntimeError:
+                source_cancelled = False
+
         response_payload = await asyncio.to_thread(
             self._stage_edited_fork_sync,
             workflow_id,
@@ -258,10 +269,11 @@ class ConductorManager:
             workflow_input_override,
             step_output_overrides,
             new_workflow_id,
-            cancel_original_if_active,
             executor_id,
             application_version,
         )
+        response_payload["source_workflow_cancelled"] = source_cancelled
+        response_payload["cancel_original_if_active"] = cancel_original_if_active
         return await self.record_local_action(
             "stage_edited_fork",
             {
@@ -273,6 +285,51 @@ class ConductorManager:
                 "cancel_original_if_active": cancel_original_if_active,
             },
             response_payload,
+        )
+
+    async def run_edited_fork(
+        self,
+        workflow_id: str,
+        start_step: int,
+        *,
+        workflow_input_override: dict[str, Any] | None = None,
+        step_output_overrides: dict[str, Any] | None = None,
+        new_workflow_id: str | None = None,
+        cancel_original_if_active: bool = False,
+    ) -> ConductorRequestRecord:
+        stage_record = await self.stage_edited_fork(
+            workflow_id,
+            start_step,
+            workflow_input_override=workflow_input_override,
+            step_output_overrides=step_output_overrides,
+            new_workflow_id=new_workflow_id,
+            cancel_original_if_active=cancel_original_if_active,
+        )
+        staged_workflow_id = (stage_record.response_payload or {}).get("new_workflow_id")
+        if not staged_workflow_id:
+            raise RuntimeError("Staged fork did not return a new_workflow_id")
+        execute_record = await self.execute_staged_fork(staged_workflow_id)
+        combined_payload = dict(stage_record.response_payload or {})
+        combined_payload.update(
+            {
+                "execution_requested": True,
+                "execute_request_id": execute_record.request_id,
+                "execute_status": execute_record.status,
+                "requires_manual_execution": False,
+                "stage_mode": "run_edited_fork",
+            }
+        )
+        return await self.record_local_action(
+            "run_edited_fork",
+            {
+                "workflow_id": workflow_id,
+                "start_step": start_step,
+                "workflow_input_override": workflow_input_override,
+                "step_output_overrides": step_output_overrides,
+                "new_workflow_id": new_workflow_id,
+                "cancel_original_if_active": cancel_original_if_active,
+            },
+            combined_payload,
         )
 
     async def execute_staged_fork(self, workflow_id: str) -> ConductorRequestRecord:
@@ -309,7 +366,6 @@ class ConductorManager:
         workflow_input_override: dict[str, Any] | None,
         step_output_overrides: dict[str, Any] | None,
         new_workflow_id: str | None,
-        cancel_original_if_active: bool,
         executor_id: str,
         application_version: str,
     ) -> dict[str, Any]:
@@ -320,8 +376,6 @@ class ConductorManager:
             dict(workflow_input_override) if workflow_input_override is not None else None
         )
         normalized_step_overrides = _normalize_step_output_overrides(step_output_overrides)
-        if normalized_input_override is not None and start_step != 0:
-            raise ValueError("workflow_input_override requires start_step 0")
 
         client = DBOSClient(system_database_url=self.system_database_url)
         try:
@@ -401,26 +455,6 @@ class ConductorManager:
                     .where(SystemSchema.workflow_status.c.workflow_uuid == workflow_id)
                     .values(was_forked_from=True)
                 )
-                source_cancelled = False
-                if cancel_original_if_active:
-                    cancel_result = conn.execute(
-                        sa.update(SystemSchema.workflow_status)
-                        .where(SystemSchema.workflow_status.c.workflow_uuid == workflow_id)
-                        .where(
-                            SystemSchema.workflow_status.c.status.in_(
-                                sorted(ACTIVE_SOURCE_STATUSES)
-                            )
-                        )
-                        .values(
-                            status="CANCELLED",
-                            queue_name=None,
-                            deduplication_id=None,
-                            started_at_epoch_ms=None,
-                            delay_until_epoch_ms=None,
-                            updated_at=current_time_ms,
-                        )
-                    )
-                    source_cancelled = cancel_result.rowcount > 0
 
             return {
                 "new_workflow_id": new_workflow_uuid,
@@ -435,10 +469,8 @@ class ConductorManager:
                 "start_step": start_step,
                 "workflow_status": "PENDING",
                 "requires_manual_execution": True,
-                "cancel_original_if_active": cancel_original_if_active,
                 "source_workflow_status": source_status_value,
                 "source_workflow_is_active": source_is_active,
-                "source_workflow_cancelled": source_cancelled,
             }
         finally:
             client.destroy()
