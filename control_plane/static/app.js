@@ -179,7 +179,7 @@ function renderWorkflows(workflows) {
         <div class="wf-actions">
           <button class="btn-sm" onclick="doInspect('${escAttr(id)}')">inspect</button>
           <button class="btn-sm" onclick="doResume('${escAttr(id)}')">resume</button>
-          <button class="btn-sm" onclick="doRestart('${escAttr(id)}')">restart</button>
+          <button class="btn-sm btn-sm-fork" onclick="doFork('${escAttr(id)}')">fork</button>
           <button class="btn-sm btn-sm-red" onclick="doCancel('${escAttr(id)}')">cancel</button>
         </div>
       </td>
@@ -268,12 +268,159 @@ window.doResume = async (id) => {
   } catch (_) {}
 };
 
-window.doRestart = async (id) => {
-  if (!confirm(`Restart workflow ${id} from step 1?`)) return;
-  try {
-    await callApi('/api/control-plane/restart', { workflow_id: id }, 'restart');
-  } catch (_) {}
+let forkState = { workflowId: null, steps: [], selectedStep: null };
+
+function forkStepDurationMs(step) {
+  const s = parseInt(step.started_at_epoch_ms, 10);
+  const e = parseInt(step.completed_at_epoch_ms, 10);
+  if (!isNaN(s) && !isNaN(e) && e >= s) return e - s;
+  return null;
+}
+
+function forkStepTimestamp(step) {
+  const ms = parseInt(step.completed_at_epoch_ms, 10);
+  if (isNaN(ms)) return null;
+  return new Date(ms).toLocaleTimeString('en-GB', { hour12: false });
+}
+
+function forkStepBadge(step) {
+  if (step.error)              return badge('ERROR');
+  if (step.completed_at_epoch_ms) return badge('COMPLETE');
+  return badge('PENDING');
+}
+
+function renderForkSteps() {
+  const { steps, selectedStep } = forkState;
+  const list = $('fork-step-list');
+  const empty = $('fork-steps-empty');
+
+  if (!steps.length) {
+    $('fork-steps-hint-text').textContent = 'No steps recorded for this workflow.';
+    empty.style.display = 'flex';
+    list.style.display  = 'none';
+    $('fork-submit-btn').disabled = true;
+    return;
+  }
+
+  empty.style.display = 'none';
+  list.style.display  = 'block';
+
+  list.innerHTML = steps.map((step, idx) => {
+    const fid      = step.function_id ?? idx;
+    const isFork   = fid === selectedStep;
+    const isPreserved = selectedStep !== null && fid < selectedStep;
+    const isPending   = selectedStep !== null && fid > selectedStep;
+
+    let stateClass = '';
+    if (isFork)       stateClass = 'is-fork-point';
+    else if (isPreserved) stateClass = 'is-preserved';
+    else if (isPending)   stateClass = 'is-pending';
+
+    const ts        = forkStepTimestamp(step);
+    const dur       = forkStepDurationMs(step);
+    const durText   = dur !== null ? `${dur}ms` : '';
+    const tsText    = ts ? ts : '';
+    const metaText  = [tsText, durText].filter(Boolean).join(' · ');
+    const restartNote = fid === 0 ? ' <span class="fork-step-note" style="color:var(--text-3)">≡ restart</span>' : '';
+
+    const indicatorText = isFork ? '↻ re-execute' : (isPreserved ? '✓ preserved' : '');
+
+    return `<div class="fork-step ${stateClass}" onclick="forkSelectStep(${fid})">
+      <div class="fork-step-num">
+        <div class="fork-step-node">${fid}</div>
+      </div>
+      <div class="fork-step-body">
+        <div class="fork-step-name">${escHtml(step.function_name || '—')}</div>
+        <div class="fork-step-meta">
+          ${forkStepBadge(step)}
+          ${metaText ? `<span class="fork-step-time">${escHtml(metaText)}</span>` : ''}
+          ${restartNote}
+        </div>
+      </div>
+      <div class="fork-step-indicator">${escHtml(indicatorText)}</div>
+    </div>`;
+  }).join('');
+
+  const submitBtn   = $('fork-submit-btn');
+  const submitLabel = $('fork-submit-label');
+
+  if (selectedStep !== null) {
+    const isRestart = selectedStep === 0;
+    submitLabel.textContent = isRestart
+      ? 'Restart (fork from step 0)'
+      : `Fork from step ${selectedStep}`;
+    submitBtn.disabled = false;
+  } else {
+    submitLabel.textContent = 'Fork';
+    submitBtn.disabled = true;
+  }
+}
+
+window.forkSelectStep = (functionId) => {
+  forkState.selectedStep = functionId;
+  renderForkSteps();
 };
+
+async function openForkModal(workflowId) {
+  forkState = { workflowId, steps: [], selectedStep: null };
+
+  $('fork-wf-id-display').textContent = workflowId;
+  $('fork-steps-hint-text').textContent = 'Loading steps…';
+  $('fork-steps-empty').style.display = 'flex';
+  $('fork-step-list').style.display   = 'none';
+  $('fork-submit-btn').disabled = true;
+  $('fork-submit-label').textContent  = 'Fork';
+  $('fork-new-id').value = '';
+
+  $('fork-overlay').style.display = 'flex';
+
+  try {
+    const res = await fetch('/api/control-plane/list-steps', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ workflow_id: workflowId, load_output: false }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.detail || res.statusText);
+
+    const raw   = json.response?.output ?? [];
+    forkState.steps = raw.slice().sort((a, b) => (a.function_id ?? 0) - (b.function_id ?? 0));
+
+    if (forkState.steps.length > 0) {
+      forkState.selectedStep = forkState.steps[0].function_id ?? 0;
+    }
+
+    renderForkSteps();
+  } catch (err) {
+    $('fork-steps-hint-text').textContent = `Failed to load steps: ${err.message}`;
+    $('fork-steps-empty').style.display   = 'flex';
+    $('fork-step-list').style.display     = 'none';
+  }
+}
+
+function closeForkModal() {
+  $('fork-overlay').style.display = 'none';
+}
+
+window.doFork = (id) => openForkModal(id);
+
+$('fork-cancel-btn').addEventListener('click', closeForkModal);
+$('fork-backdrop').addEventListener('click', closeForkModal);
+$('fork-close').addEventListener('click', closeForkModal);
+
+$('fork-submit-btn').addEventListener('click', async () => {
+  const { workflowId, selectedStep } = forkState;
+  if (workflowId === null || selectedStep === null) return;
+
+  const newId = $('fork-new-id').value.trim() || null;
+  const body  = { workflow_id: workflowId, start_step: selectedStep };
+  if (newId) body.new_workflow_id = newId;
+
+  closeForkModal();
+  try {
+    await callApi('/api/control-plane/fork', body, 'fork_workflow');
+  } catch (_) {}
+});
 
 $('btn-list-workflows').addEventListener('click', () =>
   callApi('/api/control-plane/list-workflows', {}, 'list_workflows'),
@@ -293,7 +440,10 @@ $('inspect-backdrop').addEventListener('click', closeInspect);
 $('inspect-close').addEventListener('click', closeInspect);
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeInspect();
+  if (e.key === 'Escape') {
+    closeInspect();
+    closeForkModal();
+  }
 });
 
 let pollFailed = false;

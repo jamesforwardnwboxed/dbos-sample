@@ -145,6 +145,61 @@
     </div>
   </div>
 
+  <div id="fork-overlay" style="display:none">
+    <div class="fork-backdrop" id="fork-backdrop"></div>
+    <div class="fork-box">
+
+      <div class="fork-head">
+        <div class="fork-head-left">
+          <span class="fork-title-text">Fork workflow</span>
+          <span class="fork-wf-badge mono" id="fork-wf-id-display">—</span>
+        </div>
+        <button class="inspect-close" id="fork-close" aria-label="Close">✕</button>
+      </div>
+
+      <div class="fork-explainer">
+        <span class="fork-explainer-icon">⑂</span>
+        <span>
+          Fork creates a new workflow execution reusing all completed step outputs
+          <em>before</em> the selected step, then re-executing from that step onward.
+          Selecting <strong>step 0</strong> is equivalent to a full restart.
+        </span>
+      </div>
+
+      <div id="fork-steps-area" class="fork-steps-area">
+        <div class="fork-steps-empty" id="fork-steps-empty">
+          <div class="fork-loading-hint">
+            <span class="fork-loading-icon">○</span>
+            <span id="fork-steps-hint-text">Loading steps…</span>
+          </div>
+        </div>
+        <div id="fork-step-list" class="fork-step-list" style="display:none"></div>
+      </div>
+
+      <div class="fork-foot">
+        <div class="fork-foot-left">
+          <label class="fork-new-id-label" for="fork-new-id">New workflow ID</label>
+          <input
+            type="text"
+            class="fork-input mono"
+            id="fork-new-id"
+            placeholder="auto-generated if blank"
+            autocomplete="off"
+            spellcheck="false"
+          >
+        </div>
+        <div class="fork-foot-right">
+          <button class="btn" id="fork-cancel-btn">Cancel</button>
+          <button class="btn btn-fork" id="fork-submit-btn" disabled>
+            <span class="btn-icon">⑂</span>
+            <span id="fork-submit-label">Fork</span>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <script type="module" src="/static/app.js"></script>
 </body>
 </html>
