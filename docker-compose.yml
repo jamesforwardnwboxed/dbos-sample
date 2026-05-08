@@ -28,7 +28,7 @@ services:
       PGPASSWORD: dbos
       DBOS_CONDUCTOR_URL: ws://control-plane:8001
       DBOS_CONDUCTOR_KEY: local-conductor-key
-      APP_LOG_LEVEL: warn
+      APP_LOG_LEVEL: info
       APP_ACCESS_LOG: "false"
     ports:
       - "8000:8000"

@@ -35,10 +35,12 @@ class ExampleImpl implements Example {
   @Override
   @Workflow
   public String workflow(String name) {
+    logger.info("Starting workflow for {}", name);
     int nameLength = dbos.runStep(() -> stepOne(name), "step_one");
 
     Path existingFile = Path.of("existing.txt");
     if (Files.notExists(existingFile)) {
+      logger.warn("existing.txt missing; creating it and exiting to simulate a crash");
       try {
         Files.createFile(existingFile);
       } catch (IOException e) {
@@ -48,11 +50,14 @@ class ExampleImpl implements Example {
     }
 
     dbos.runStep(() -> stepTwo(name, nameLength), "step_two");
+    logger.info("Completed workflow for {}", name);
     return "workflow executed";
   }
 }
 
 public class App {
+  private static final Logger logger = LoggerFactory.getLogger(App.class);
+
   private static boolean envFlag(String name, boolean defaultValue) {
     String raw = System.getenv(name);
     if (raw == null) {
@@ -65,7 +70,7 @@ public class App {
   }
 
   private static void configureLogging() {
-    String level = System.getenv().getOrDefault("APP_LOG_LEVEL", "warn").toLowerCase();
+    String level = System.getenv().getOrDefault("APP_LOG_LEVEL", "info").toLowerCase();
     System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", level);
     System.setProperty("org.slf4j.simpleLogger.showDateTime", "false");
     System.setProperty("org.slf4j.simpleLogger.showThreadName", "false");
