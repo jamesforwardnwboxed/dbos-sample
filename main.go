@@ -16,6 +16,18 @@ import (
 
 var logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
+type WorkflowInput struct {
+	Name    string         `json:"name"`
+	Aliases []string       `json:"aliases"`
+	Weights map[string]int `json:"weights"`
+}
+
+type StepOneResult struct {
+	Greeting   string         `json:"greeting"`
+	NameLength int            `json:"nameLength"`
+	Metrics    map[string]int `json:"metrics"`
+}
+
 func envFlag(name string, defaultValue bool) bool {
 	raw, ok := os.LookupEnv(name)
 	if !ok {
@@ -49,18 +61,18 @@ func configureLogging() (string, bool) {
 	return levelName, envFlag("APP_ACCESS_LOG", false)
 }
 
-func workflow(ctx dbos.DBOSContext, name string) (string, error) {
-	logger.Info("starting workflow", "name", name)
-	nameLengthAny, err := dbos.RunAsStep(ctx, func(stepCtx context.Context) (any, error) {
-		return stepOne(stepCtx, name)
+func workflow(ctx dbos.DBOSContext, input WorkflowInput) (string, error) {
+	logger.Info("starting workflow", "name", input.Name)
+	stepOneResultAny, err := dbos.RunAsStep(ctx, func(stepCtx context.Context) (any, error) {
+		return stepOne(stepCtx, input)
 	})
 	if err != nil {
 		return "", err
 	}
 
-	nameLength, ok := nameLengthAny.(int)
+	stepOneResult, ok := stepOneResultAny.(StepOneResult)
 	if !ok {
-		return "", fmt.Errorf("unexpected stepOne result type %T", nameLengthAny)
+		return "", fmt.Errorf("unexpected stepOne result type %T", stepOneResultAny)
 	}
 
 	existingFile := filepath.Join(".", "existing.txt")
@@ -77,25 +89,56 @@ func workflow(ctx dbos.DBOSContext, name string) (string, error) {
 	}
 
 	_, err = dbos.RunAsStep(ctx, func(stepCtx context.Context) (any, error) {
-		return stepTwo(stepCtx, name, nameLength)
+		return stepTwo(stepCtx, input, stepOneResult)
 	})
 	if err != nil {
 		return "", err
 	}
 
-	logger.Info("completed workflow", "name", name)
+	logger.Info("completed workflow", "name", input.Name)
 	return "workflow executed", nil
 }
 
-func stepOne(ctx context.Context, name string) (int, error) {
-	logger.Info("hello", "name", name)
+func stepOne(ctx context.Context, input WorkflowInput) (StepOneResult, error) {
+	logger.Info("hello", "name", input.Name)
 	logger.Info("step one completed")
-	return len(name), nil
+	return StepOneResult{
+		Greeting:   fmt.Sprintf("Hello %s", input.Name),
+		NameLength: len(input.Name),
+		Metrics: map[string]int{
+			"nameLength": len(input.Name),
+			"aliasCount": len(input.Aliases),
+			"weightCount": len(input.Weights),
+		},
+	}, nil
 }
 
-func stepTwo(ctx context.Context, name string, nameLength int) (string, error) {
-	logger.Info("step two completed", "name", name, "name_length", nameLength)
+func stepTwo(ctx context.Context, input WorkflowInput, result StepOneResult) (string, error) {
+	logger.Info("step two completed", "name", input.Name, "name_length", result.NameLength)
 	return "ok", nil
+}
+
+func buildWorkflowInput(name string) WorkflowInput {
+	return WorkflowInput{
+		Name:    name,
+		Aliases: []string{strings.ToUpper(name), reverseString(name)},
+		Weights: map[string]int{"primary": len(name), "secondary": max(1, len(name)/2)},
+	}
+}
+
+func reverseString(value string) string {
+	runes := []rune(value)
+	for left, right := 0, len(runes)-1; left < right; left, right = left+1, right-1 {
+		runes[left], runes[right] = runes[right], runes[left]
+	}
+	return string(runes)
+}
+
+func max(a int, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func main() {
@@ -129,8 +172,9 @@ func main() {
 	}
 	router.GET("/", func(c *gin.Context) {
 		name := c.DefaultQuery("name", "world")
+		input := buildWorkflowInput(name)
 
-		handle, runErr := dbos.RunWorkflow(dbosContext, workflow, name)
+		handle, runErr := dbos.RunWorkflow(dbosContext, workflow, input)
 		if runErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": runErr.Error()})
 			return
