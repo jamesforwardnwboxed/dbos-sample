@@ -21,9 +21,7 @@ def test_build_dbos_config_reads_conductor_env(monkeypatch: pytest.MonkeyPatch) 
     assert config["conductor_key"] == "test-key"
 
 
-def test_run_workflow_logic_exits_once_when_file_missing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
+def test_run_workflow_logic_exits_for_poison_input(monkeypatch: pytest.MonkeyPatch) -> None:
     events: list[tuple[str, object]] = []
 
     monkeypatch.setattr(
@@ -40,27 +38,16 @@ def test_run_workflow_logic_exits_once_when_file_missing(
         "step_two",
         lambda input_data, step_one_result: events.append((input_data.name, step_one_result.name_length)),
     )
-    monkeypatch.setattr(app_runtime, "get_existing_file_path", lambda: str(tmp_path / "existing.txt"))
-
-    def fake_exit(code: int) -> None:
-        raise SystemExit(code)
-
-    monkeypatch.setattr(app_runtime.os, "_exit", fake_exit)
 
     with pytest.raises(SystemExit) as exc_info:
-        app_runtime.run_workflow_logic("world")
+        app_runtime.run_workflow_logic("poison")
 
     assert exc_info.value.code == 1
-    assert (tmp_path / "existing.txt").exists()
     assert events == []
 
 
-def test_run_workflow_logic_completes_when_file_exists(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
+def test_run_workflow_logic_completes_for_non_poison_input(monkeypatch: pytest.MonkeyPatch) -> None:
     events: list[tuple[str, int]] = []
-    existing_file = tmp_path / "existing.txt"
-    existing_file.touch()
 
     monkeypatch.setattr(
         app_runtime,
@@ -76,7 +63,6 @@ def test_run_workflow_logic_completes_when_file_exists(
         "step_two",
         lambda input_data, step_one_result: events.append((input_data.name, step_one_result.name_length)),
     )
-    monkeypatch.setattr(app_runtime, "get_existing_file_path", lambda: str(existing_file))
 
     app_runtime.run_workflow_logic("James")
 

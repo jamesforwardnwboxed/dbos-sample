@@ -8,8 +8,8 @@ The DBOS app service exposes `GET /` and runs a DBOS workflow with two steps:
 
 - the workflow input is a structured Python object built from the `name` query parameter
 - `step_one` prints a greeting and returns a structured Python object containing the greeting, name length, and extra metrics
-- the workflow creates `existing.txt` and exits once to simulate a crash
-- after restart, DBOS resumes the workflow and runs `step_two`
+- the workflow exits immediately when `name=poison` to simulate a crash
+- otherwise the workflow continues to `step_two`
 
 Call the endpoint with an optional `name` query parameter, for example `/?name=James`.
 
@@ -113,9 +113,9 @@ Default behavior keeps workflow and lifecycle logs at `info` while leaving HTTP 
 
 1. Start the stack with `docker compose up --build`.
 2. Open `http://localhost:8000/?name=world`.
-3. The first request creates `existing.txt` and exits the app container intentionally.
+3. Open `http://localhost:8000/?name=poison` to make the app container exit intentionally.
 4. Docker Compose restarts the app container automatically.
-5. DBOS resumes the workflow from the point after `step_one`.
+5. Trigger recovery or inspect the control-plane UI to observe the poisoned workflow state.
 
 ## Try the fork flow
 

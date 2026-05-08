@@ -54,10 +54,6 @@ def configure_logging() -> None:
     logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s", force=True)
 
 
-def get_existing_file_path() -> str:
-    return os.path.join(os.path.dirname(__file__), "existing.txt")
-
-
 def build_workflow_input(name: str = "world") -> WorkflowInput:
     return WorkflowInput(
         name=name,
@@ -70,12 +66,9 @@ def run_workflow_logic(name: str = "world") -> None:
     workflow_input = build_workflow_input(name)
     logger.info("Starting workflow for %s", workflow_input.name)
     step_one_result = step_one(workflow_input)
-    existing_file = get_existing_file_path()
-    if not os.path.exists(existing_file):
-        logger.warning("existing.txt missing; creating it and exiting to simulate a crash")
-        with open(existing_file, "w"):
-            pass
-        os._exit(1)
+    if workflow_input.name == "poison":
+        logger.warning("poison input received; exiting to simulate a crash")
+        raise SystemExit(1)
     step_two(workflow_input, step_one_result)
     logger.info("Completed workflow for %s", workflow_input.name)
 
