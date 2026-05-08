@@ -17,6 +17,7 @@ def create_app(config: ControlPlaneConfig | None = None) -> FastAPI:
         app_name=config.app_name,
         conductor_key=config.conductor_key,
         request_timeout_seconds=config.request_timeout_seconds,
+        system_database_url=config.system_database_url,
     )
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     app.include_router(http_router)

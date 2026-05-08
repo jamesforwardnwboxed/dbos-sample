@@ -16,6 +16,7 @@ def create_control_plane_app():
         ControlPlaneConfig(
             app_name="dbos-starter",
             conductor_key="local-conductor-key",
+            system_database_url="postgres://postgres:dbos@postgres:5432/dbos_starter",
             request_timeout_seconds=1.0,
         )
     )
