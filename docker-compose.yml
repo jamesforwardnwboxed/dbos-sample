@@ -22,9 +22,24 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      DBOS_APP_NAME: dbos-starter
       DBOS_SYSTEM_DATABASE_URL: postgres://postgres:dbos@postgres:5432/dbos_starter
+      DBOS_CONDUCTOR_URL: ws://control-plane:8001
+      DBOS_CONDUCTOR_KEY: local-conductor-key
     ports:
       - "8000:8000"
+    restart: on-failure
+
+  control-plane:
+    build:
+      context: .
+      dockerfile: Dockerfile.control-plane
+    environment:
+      CONTROL_PLANE_APP_NAME: dbos-starter
+      CONTROL_PLANE_CONDUCTOR_KEY: local-conductor-key
+      CONTROL_PLANE_PORT: 8001
+    ports:
+      - "8001:8001"
     restart: on-failure
 
 volumes:

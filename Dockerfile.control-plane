@@ -17,6 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 COPY --from=builder /install /usr/local
-COPY main.py app_runtime.py requirements.txt README.md ./
+COPY control_plane ./control_plane
+COPY requirements.txt ./
 
-CMD ["python", "main.py"]
+CMD ["python", "-m", "control_plane.main"]
