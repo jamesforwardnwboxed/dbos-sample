@@ -166,6 +166,28 @@
         </span>
       </div>
 
+      <div class="fork-explainer" style="margin-top:10px">
+        <span class="fork-explainer-icon">✎</span>
+        <span id="fork-override-help">
+          Edited input is a shim-owned staged fork path. Add an override below to create a new
+          <strong>PENDING</strong> workflow from step 0 for review before execution.
+        </span>
+      </div>
+
+      <div class="fork-status-row">
+        <div class="fork-status-card">
+          <span class="fork-status-label">Source workflow status</span>
+          <span class="fork-status-value" id="fork-source-status">—</span>
+        </div>
+        <label class="fork-checkbox-row" id="fork-cancel-original-row" hidden>
+          <input type="checkbox" id="fork-cancel-original" checked>
+          <span>
+            Cancel original workflow if it is still active
+            <small id="fork-cancel-original-help">Applies only to pending / queued workflows.</small>
+          </span>
+        </label>
+      </div>
+
       <div id="fork-steps-area" class="fork-steps-area">
         <div class="fork-steps-empty" id="fork-steps-empty">
           <div class="fork-loading-hint">
@@ -187,6 +209,14 @@
             autocomplete="off"
             spellcheck="false"
           >
+          <label class="fork-new-id-label" for="fork-input-override" style="margin-top:12px">Input override</label>
+          <textarea
+            class="fork-input mono"
+            id="fork-input-override"
+            rows="5"
+            placeholder='{"name": "Ada"}'
+            spellcheck="false"
+          ></textarea>
         </div>
         <div class="fork-foot-right">
           <button class="btn" id="fork-cancel-btn">Cancel</button>
@@ -197,10 +227,23 @@
         </div>
       </div>
 
+      <div class="fork-post-stage" id="fork-post-stage" hidden>
+        <div class="fork-post-stage-copy">
+          <span class="fork-post-stage-title">Fork staged for review</span>
+          <span class="fork-post-stage-body" id="fork-post-stage-body">Stage an edited-input fork to review it before execution.</span>
+        </div>
+        <div class="fork-post-stage-actions">
+          <button class="btn" id="fork-post-stage-dismiss">Review later</button>
+          <button class="btn btn-fork" id="fork-execute-btn" disabled>
+            <span class="btn-icon">▶</span>
+            <span>Execute this forked workflow now?</span>
+          </button>
+        </div>
+      </div>
+
     </div>
   </div>
 
   <script type="module" src="/static/app.js"></script>
 </body>
 </html>
-

@@ -15,6 +15,8 @@ class FakeRecord:
 class FakeManager:
     def __init__(self) -> None:
         self.last_fork_call = None
+        self.last_stage_input_override_fork_call = None
+        self.last_execute_staged_fork_call = None
 
     async def snapshot(self):
         return {
@@ -39,7 +41,16 @@ class FakeManager:
         assert workflow_id == "wf-1"
         assert load_input is True
         assert load_output is False
-        return FakeRecord(request_id="req-get", status="succeeded", response_payload={"output": {"WorkflowUUID": workflow_id}})
+        return FakeRecord(
+            request_id="req-get",
+            status="succeeded",
+            response_payload={
+                "output": {
+                    "WorkflowUUID": workflow_id,
+                    "Input": "{'args': (), 'kwargs': {'name': 'world'}}",
+                }
+            },
+        )
 
     async def send_list_steps(self, workflow_id, *, load_output, limit, offset):
         assert workflow_id == "wf-1"
@@ -87,6 +98,43 @@ class FakeManager:
             response_payload={"new_workflow_id": new_workflow_id or "generated-fork-id"},
         )
 
+    async def stage_input_override_fork(
+        self,
+        workflow_id,
+        start_step,
+        *,
+        input_override,
+        new_workflow_id=None,
+        cancel_original_if_active=False,
+    ):
+        self.last_stage_input_override_fork_call = {
+            "workflow_id": workflow_id,
+            "start_step": start_step,
+            "input_override": input_override,
+            "new_workflow_id": new_workflow_id,
+            "cancel_original_if_active": cancel_original_if_active,
+        }
+        return FakeRecord(
+            request_id="req-override",
+            status="succeeded",
+            response_payload={
+                "new_workflow_id": new_workflow_id or "generated-override-id",
+                "stage_mode": "input_override_fork",
+                "requires_manual_execution": True,
+            },
+        )
+
+    async def execute_staged_fork(self, workflow_id):
+        self.last_execute_staged_fork_call = {"workflow_id": workflow_id}
+        return FakeRecord(
+            request_id="req-execute",
+            status="succeeded",
+            response_payload={
+                "workflow_id": workflow_id,
+                "execution_requested": True,
+            },
+        )
+
 
 def test_ui_and_static_assets_are_served() -> None:
     with create_control_plane_client() as client:
@@ -95,8 +143,13 @@ def test_ui_and_static_assets_are_served() -> None:
 
         assert ui_response.status_code == 200
         assert "Control Plane" in ui_response.text
+        assert "fork-input-override" in ui_response.text
+        assert "fork-cancel-original" in ui_response.text
+        assert "Execute this forked workflow now?" in ui_response.text
         assert js_response.status_code == 200
         assert "setInterval(refresh, 1500);" in js_response.text
+        assert "cancel_original_if_active" in js_response.text
+        assert "/api/control-plane/execute-staged-fork" in js_response.text
 
 
 def test_http_routes_delegate_to_manager() -> None:
@@ -126,6 +179,7 @@ def test_http_routes_delegate_to_manager() -> None:
             json={"workflow_id": "wf-1", "queue_name": "critical"},
         )
         restart_response = client.post("/api/control-plane/restart", json={"workflow_id": "wf-1"})
+        execute_response = client.post("/api/control-plane/execute-staged-fork", json={"workflow_id": "wf-1"})
         fork_response = client.post(
             "/api/control-plane/fork",
             json={
@@ -145,6 +199,7 @@ def test_http_routes_delegate_to_manager() -> None:
         assert queued_response.json()["request_id"] == "req-queued"
         assert workflow_response.status_code == 200
         assert workflow_response.json()["request_id"] == "req-get"
+        assert workflow_response.json()["input_override_seed"] == {"name": "world"}
         assert steps_response.status_code == 200
         assert steps_response.json()["request_id"] == "req-steps"
         assert recovery_response.status_code == 200
@@ -155,6 +210,9 @@ def test_http_routes_delegate_to_manager() -> None:
         assert resume_response.json()["request_id"] == "req-resume"
         assert restart_response.status_code == 200
         assert restart_response.json()["request_id"] == "req-restart"
+        assert execute_response.status_code == 200
+        assert execute_response.json()["request_id"] == "req-execute"
+        assert manager.last_execute_staged_fork_call == {"workflow_id": "wf-1"}
         assert fork_response.status_code == 200
         assert fork_response.json()["request_id"] == "req-fork"
         assert manager.last_fork_call == {
@@ -188,6 +246,149 @@ def test_fork_route_accepts_minimal_ui_payload() -> None:
         }
 
 
+def test_get_workflow_returns_no_input_override_seed_when_input_is_not_parseable() -> None:
+    app = create_control_plane_app()
+    manager = FakeManager()
+
+    async def fake_send_get_workflow(workflow_id, *, load_input, load_output):
+        return FakeRecord(
+            request_id="req-get",
+            status="succeeded",
+            response_payload={
+                "output": {
+                    "WorkflowUUID": workflow_id,
+                    "Input": "not-json-or-python-literal",
+                }
+            },
+        )
+
+    manager.send_get_workflow = fake_send_get_workflow
+    app.state.conductor_manager = manager
+
+    with create_control_plane_client().__class__(app) as client:
+        response = client.post(
+            "/api/control-plane/get-workflow",
+            json={"workflow_id": "wf-1", "load_input": True, "load_output": False},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["input_override_seed"] is None
+
+
+def test_fork_route_uses_local_rerun_for_input_override() -> None:
+    app = create_control_plane_app()
+    manager = FakeManager()
+    app.state.conductor_manager = manager
+
+    with create_control_plane_client().__class__(app) as client:
+        response = client.post(
+            "/api/control-plane/fork",
+            json={
+                "workflow_id": "wf-1",
+                "start_step": 0,
+                "new_workflow_id": "wf-override",
+                "input_override": {"name": "Ada"},
+                "cancel_original_if_active": True,
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["request_id"] == "req-override"
+        assert response.json()["response"] == {
+            "new_workflow_id": "wf-override",
+            "stage_mode": "input_override_fork",
+            "requires_manual_execution": True,
+        }
+        assert manager.last_stage_input_override_fork_call == {
+            "workflow_id": "wf-1",
+            "start_step": 0,
+            "input_override": {"name": "Ada"},
+            "new_workflow_id": "wf-override",
+            "cancel_original_if_active": True,
+        }
+        assert manager.last_fork_call is None
+
+
+def test_fork_route_returns_not_found_for_missing_override_source() -> None:
+    app = create_control_plane_app()
+    manager = FakeManager()
+
+    async def fake_missing_source(*args, **kwargs):
+        raise LookupError("Unknown workflow_id: wf-missing")
+
+    manager.stage_input_override_fork = fake_missing_source
+    app.state.conductor_manager = manager
+
+    with create_control_plane_client().__class__(app) as client:
+        response = client.post(
+            "/api/control-plane/fork",
+            json={
+                "workflow_id": "wf-missing",
+                "start_step": 0,
+                "input_override": {"name": "Ada"},
+            },
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Unknown workflow_id: wf-missing"
+
+
+def test_execute_staged_fork_route_returns_not_found_for_missing_workflow() -> None:
+    app = create_control_plane_app()
+    manager = FakeManager()
+
+    async def fake_missing_workflow(workflow_id):
+        raise LookupError(f"Unknown workflow_id: {workflow_id}")
+
+    manager.execute_staged_fork = fake_missing_workflow
+    app.state.conductor_manager = manager
+
+    with create_control_plane_client().__class__(app) as client:
+        response = client.post(
+            "/api/control-plane/execute-staged-fork",
+            json={"workflow_id": "wf-missing"},
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Unknown workflow_id: wf-missing"
+
+
+def test_fork_route_validates_input_override_shape() -> None:
+    app = create_control_plane_app()
+    app.state.conductor_manager = FakeManager()
+
+    with create_control_plane_client().__class__(app) as client:
+        response = client.post(
+            "/api/control-plane/fork",
+            json={
+                "workflow_id": "wf-1",
+                "start_step": 0,
+                "input_override": "name=Ada",
+            },
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "input_override must be a JSON object"
+
+
+def test_fork_route_requires_restart_boundary_for_input_override() -> None:
+    app = create_control_plane_app()
+    app.state.conductor_manager = FakeManager()
+
+    with create_control_plane_client().__class__(app) as client:
+        response = client.post(
+            "/api/control-plane/fork",
+            json={
+                "workflow_id": "wf-1",
+                "start_step": 2,
+                "input_override": {"name": "Ada"},
+            },
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "input_override requires start_step 0"
+
+
 def test_routes_validate_required_workflow_id() -> None:
     app = create_control_plane_app()
     app.state.conductor_manager = FakeManager()
@@ -198,6 +399,7 @@ def test_routes_validate_required_workflow_id() -> None:
         assert client.post("/api/control-plane/cancel", json={}).status_code == 400
         assert client.post("/api/control-plane/resume", json={}).status_code == 400
         assert client.post("/api/control-plane/restart", json={}).status_code == 400
+        assert client.post("/api/control-plane/execute-staged-fork", json={}).status_code == 400
         assert client.post("/api/control-plane/fork", json={}).status_code == 400
 
 

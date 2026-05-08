@@ -268,7 +268,42 @@ window.doResume = async (id) => {
   } catch (_) {}
 };
 
-let forkState = { workflowId: null, steps: [], selectedStep: null };
+const ACTIVE_FORK_SOURCE_STATUSES = new Set(['PENDING', 'ENQUEUED', 'DELAYED']);
+
+let forkState = {
+  workflowId: null,
+  steps: [],
+  selectedStep: null,
+  workflowInputText: '',
+  sourceStatus: null,
+  sourceIsActive: false,
+  stagedWorkflowId: null,
+};
+
+function resetForkPostStage() {
+  forkState.stagedWorkflowId = null;
+  $('fork-post-stage').hidden = true;
+  $('fork-post-stage-body').textContent = 'Stage an edited-input fork to review it before execution.';
+  $('fork-execute-btn').disabled = true;
+}
+
+function showForkPostStage(response) {
+  const stagedWorkflowId = response?.new_workflow_id;
+  forkState.stagedWorkflowId = stagedWorkflowId || null;
+  $('fork-post-stage').hidden = false;
+  $('fork-post-stage-body').textContent = stagedWorkflowId
+    ? `Fork ${stagedWorkflowId} is staged as PENDING. Review it now, or execute it when ready.`
+    : 'Fork staged as PENDING. Review it now, or execute it when ready.';
+  $('fork-execute-btn').disabled = !stagedWorkflowId;
+}
+
+function renderForkSourceControls() {
+  const sourceStatus = forkState.sourceStatus || '—';
+  const isActive = forkState.sourceIsActive;
+  $('fork-source-status').innerHTML = badge(sourceStatus);
+  $('fork-cancel-original-row').hidden = !isActive;
+  $('fork-cancel-original').checked = isActive;
+}
 
 function forkStepDurationMs(step) {
   const s = parseInt(step.started_at_epoch_ms, 10);
@@ -293,6 +328,8 @@ function renderForkSteps() {
   const { steps, selectedStep } = forkState;
   const list = $('fork-step-list');
   const empty = $('fork-steps-empty');
+  const overrideRaw = $('fork-input-override').value.trim();
+  const hasOverride = overrideRaw.length > 0;
 
   if (!steps.length) {
     $('fork-steps-hint-text').textContent = 'No steps recorded for this workflow.';
@@ -323,7 +360,9 @@ function renderForkSteps() {
     const metaText  = [tsText, durText].filter(Boolean).join(' · ');
     const restartNote = fid === 0 ? ' <span class="fork-step-note" style="color:var(--text-3)">≡ restart</span>' : '';
 
-    const indicatorText = isFork ? '↻ re-execute' : (isPreserved ? '✓ preserved' : '');
+    const indicatorText = isFork
+      ? (hasOverride && fid === 0 ? '✎ rerun with edited input' : '↻ re-execute')
+      : (isPreserved ? '✓ preserved' : '');
 
     return `<div class="fork-step ${stateClass}" onclick="forkSelectStep(${fid})">
       <div class="fork-step-num">
@@ -346,13 +385,23 @@ function renderForkSteps() {
 
   if (selectedStep !== null) {
     const isRestart = selectedStep === 0;
-    submitLabel.textContent = isRestart
-      ? 'Restart (fork from step 0)'
-      : `Fork from step ${selectedStep}`;
-    submitBtn.disabled = false;
+    if (hasOverride) {
+      submitLabel.textContent = 'Stage edited-input fork';
+      submitBtn.disabled = !isRestart;
+      $('fork-override-help').textContent = isRestart
+        ? 'Edited input stages a new PENDING workflow from step 0 with the JSON override below.'
+        : 'Edited input only supports a staged full rerun from step 0. Select step 0 to continue.';
+    } else {
+      submitLabel.textContent = isRestart
+        ? 'Restart (fork from step 0)'
+        : `Fork from step ${selectedStep}`;
+      submitBtn.disabled = false;
+      $('fork-override-help').textContent = 'Edited input is a shim-owned staged fork path. Add an override below to stage a new workflow from step 0 with new input; execution happens as a separate reviewed action.';
+    }
   } else {
     submitLabel.textContent = 'Fork';
     submitBtn.disabled = true;
+    $('fork-override-help').textContent = 'Edited input is a shim-owned staged fork path. Add an override below to stage a new workflow from step 0 with new input; execution happens as a separate reviewed action.';
   }
 }
 
@@ -362,7 +411,15 @@ window.forkSelectStep = (functionId) => {
 };
 
 async function openForkModal(workflowId) {
-  forkState = { workflowId, steps: [], selectedStep: null };
+  forkState = {
+    workflowId,
+    steps: [],
+    selectedStep: null,
+    workflowInputText: '',
+    sourceStatus: null,
+    sourceIsActive: false,
+    stagedWorkflowId: null,
+  };
 
   $('fork-wf-id-display').textContent = workflowId;
   $('fork-steps-hint-text').textContent = 'Loading steps…';
@@ -371,8 +428,35 @@ async function openForkModal(workflowId) {
   $('fork-submit-btn').disabled = true;
   $('fork-submit-label').textContent  = 'Fork';
   $('fork-new-id').value = '';
+  $('fork-input-override').value = '';
+  $('fork-override-help').textContent = 'Edited input is a shim-owned staged fork path. Add an override below to stage a new workflow from step 0 with new input; execution happens as a separate reviewed action.';
+  $('fork-source-status').textContent = '—';
+  $('fork-cancel-original-row').hidden = true;
+  resetForkPostStage();
 
   $('fork-overlay').style.display = 'flex';
+
+  try {
+    const workflowRes = await fetch('/api/control-plane/get-workflow', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workflow_id: workflowId, load_input: true, load_output: false }),
+    });
+    const workflowJson = await workflowRes.json();
+    if (workflowRes.ok) {
+      const workflowOutput = workflowJson.response?.output ?? {};
+      const sourceStatus = workflowOutput.Status || null;
+      forkState.sourceStatus = sourceStatus;
+      forkState.sourceIsActive = ACTIVE_FORK_SOURCE_STATUSES.has(sourceStatus);
+      renderForkSourceControls();
+      const inputSeed = workflowJson.input_override_seed;
+      if (inputSeed && typeof inputSeed === 'object' && !Array.isArray(inputSeed)) {
+        const seededJson = JSON.stringify(inputSeed, null, 2);
+        forkState.workflowInputText = seededJson;
+        $('fork-input-override').value = seededJson;
+      }
+    }
+  } catch (_) {}
 
   try {
     const res = await fetch('/api/control-plane/list-steps', {
@@ -400,6 +484,7 @@ async function openForkModal(workflowId) {
 
 function closeForkModal() {
   $('fork-overlay').style.display = 'none';
+  resetForkPostStage();
 }
 
 window.doFork = (id) => openForkModal(id);
@@ -407,18 +492,50 @@ window.doFork = (id) => openForkModal(id);
 $('fork-cancel-btn').addEventListener('click', closeForkModal);
 $('fork-backdrop').addEventListener('click', closeForkModal);
 $('fork-close').addEventListener('click', closeForkModal);
+$('fork-input-override').addEventListener('input', renderForkSteps);
+$('fork-post-stage-dismiss').addEventListener('click', resetForkPostStage);
+
+$('fork-execute-btn').addEventListener('click', async () => {
+  const workflowId = forkState.stagedWorkflowId;
+  if (!workflowId) return;
+  try {
+    await callApi('/api/control-plane/execute-staged-fork', { workflow_id: workflowId }, 'execute_staged_fork');
+    resetForkPostStage();
+  } catch (_) {}
+});
 
 $('fork-submit-btn').addEventListener('click', async () => {
   const { workflowId, selectedStep } = forkState;
   if (workflowId === null || selectedStep === null) return;
 
   const newId = $('fork-new-id').value.trim() || null;
+  const overrideText = $('fork-input-override').value.trim();
   const body  = { workflow_id: workflowId, start_step: selectedStep };
   if (newId) body.new_workflow_id = newId;
 
-  closeForkModal();
+  if (overrideText) {
+    let parsedOverride;
+    try {
+      parsedOverride = JSON.parse(overrideText);
+    } catch (_) {
+      const msg = $('action-msg');
+      msg.hidden = false;
+      msg.className = 'action-msg err';
+      msg.textContent = 'fork_workflow failed: Input override must be valid JSON';
+      setTimeout(() => { msg.hidden = true; }, 5000);
+      return;
+    }
+    body.input_override = parsedOverride;
+    body.cancel_original_if_active = forkState.sourceIsActive && $('fork-cancel-original').checked;
+  }
+
   try {
-    await callApi('/api/control-plane/fork', body, 'fork_workflow');
+    const response = await callApi('/api/control-plane/fork', body, 'fork_workflow');
+    if (body.input_override) {
+      showForkPostStage(response.response);
+      return;
+    }
+    closeForkModal();
   } catch (_) {}
 });
 
