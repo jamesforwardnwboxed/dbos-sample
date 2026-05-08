@@ -47,11 +47,13 @@ app.get("/", async (req, res, next) => {
 
 async function main(): Promise<void> {
   DBOS.setConfig({
-    name: "dbos-starter",
+    name: process.env.DBOS_APP_NAME ?? "dbos-starter",
     systemDatabaseUrl: process.env.DBOS_SYSTEM_DATABASE_URL,
   });
 
-  await DBOS.launch();
+  const conductorKey = process.env.DBOS_CONDUCTOR_KEY;
+  const conductorURL = process.env.DBOS_CONDUCTOR_URL;
+  await DBOS.launch(conductorKey ? { conductorKey, conductorURL } : undefined);
 
   app.listen(8000, () => {
     DBOS.logger.info("Server is running on http://localhost:8000");
