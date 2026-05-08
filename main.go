@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -75,16 +74,8 @@ func workflow(ctx dbos.DBOSContext, input WorkflowInput) (string, error) {
 		return "", fmt.Errorf("unexpected stepOne result type %T", stepOneResultAny)
 	}
 
-	existingFile := filepath.Join(".", "existing.txt")
-	if _, statErr := os.Stat(existingFile); os.IsNotExist(statErr) {
-		logger.Warn("existing.txt missing; creating it and exiting to simulate a crash")
-		file, createErr := os.Create(existingFile)
-		if createErr != nil {
-			return "", createErr
-		}
-		if closeErr := file.Close(); closeErr != nil {
-			return "", closeErr
-		}
+	if input.Name == "poison" {
+		logger.Warn("poison input received; exiting to simulate a crash")
 		os.Exit(1)
 	}
 
