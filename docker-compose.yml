@@ -33,7 +33,7 @@ services:
     restart: on-failure
 
   control-plane:
-    image: dbos-control-plane:latest
+    image: stepchange:latest
     environment:
       CONTROL_PLANE_APP_NAME: dbos-starter
       CONTROL_PLANE_CONDUCTOR_KEY: local-conductor-key
