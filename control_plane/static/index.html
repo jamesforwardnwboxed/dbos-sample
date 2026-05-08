@@ -169,8 +169,9 @@
       <div class="fork-explainer" style="margin-top:10px">
         <span class="fork-explainer-icon">✎</span>
         <span id="fork-override-help">
-          Edited input is a shim-owned staged fork path. Add an override below to create a new
-          <strong>PENDING</strong> workflow from step 0 for review before execution.
+          Edited recovery stages a new <strong>PENDING</strong> fork for review. You can edit
+          workflow input only when restarting from step 0, and edit preserved checkpoint outputs
+          for completed steps before the selected fork boundary.
         </span>
       </div>
 
@@ -217,6 +218,12 @@
             placeholder='{"name": "Ada"}'
             spellcheck="false"
           ></textarea>
+          <label class="fork-new-id-label" for="fork-step-overrides" style="margin-top:12px">Checkpoint edits</label>
+          <div class="fork-step-overrides" id="fork-step-overrides">
+            <div class="fork-step-overrides-empty" id="fork-step-overrides-empty">
+              Select a fork boundary to edit preserved step outputs.
+            </div>
+          </div>
         </div>
         <div class="fork-foot-right">
           <button class="btn" id="fork-cancel-btn">Cancel</button>

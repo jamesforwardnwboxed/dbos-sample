@@ -349,27 +349,28 @@ async def test_record_local_action_updates_snapshot() -> None:
     manager = ConductorManager(app_name="dbos-starter", conductor_key="local-conductor-key")
 
     record = await manager.record_local_action(
-        "stage_input_override_fork",
+        "stage_edited_fork",
         {
             "workflow_id": "wf-1",
             "start_step": 0,
-            "input_override": {"name": "Ada"},
+            "workflow_input_override": {"name": "Ada"},
+            "step_output_overrides": None,
             "cancel_original_if_active": True,
         },
         {
             "new_workflow_id": "wf-override",
-            "stage_mode": "input_override_fork",
+            "stage_mode": "edited_fork",
         },
     )
     snapshot = await manager.snapshot()
 
     assert record.status == "succeeded"
-    assert snapshot["requests"][0]["message_type"] == "stage_input_override_fork"
-    assert snapshot["requests"][0]["request_payload"]["input_override"] == {"name": "Ada"}
-    assert snapshot["events"][0]["summary"] == "completed local stage_input_override_fork action"
+    assert snapshot["requests"][0]["message_type"] == "stage_edited_fork"
+    assert snapshot["requests"][0]["request_payload"]["workflow_input_override"] == {"name": "Ada"}
+    assert snapshot["events"][0]["summary"] == "completed local stage_edited_fork action"
 
 
-def test_stage_input_override_fork_sync_stages_pending_workflow_and_cancels_active_source(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stage_edited_fork_sync_uses_native_fork_and_patches_workflow_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = ConductorManager(
         app_name="dbos-starter",
         conductor_key="local-conductor-key",
@@ -403,6 +404,18 @@ def test_stage_input_override_fork_sync_stages_pending_workflow_and_cancels_acti
             self._serializer = object()
             self._sys_db = SimpleNamespace(
                 get_workflow_status=lambda workflow_id: source_status if workflow_id == "wf-1" else None,
+                fork_workflow=lambda original_ids, forked_ids, start_steps, application_version, queue_name=None: captured.setdefault(
+                    "fork_calls",
+                    [],
+                ).append(
+                    {
+                        "original_ids": original_ids,
+                        "forked_ids": forked_ids,
+                        "start_steps": start_steps,
+                        "application_version": application_version,
+                        "queue_name": queue_name,
+                    }
+                ),
                 engine=SimpleNamespace(begin=lambda: _DummyBeginContext(captured)),
             )
 
@@ -419,43 +432,50 @@ def test_stage_input_override_fork_sync_stages_pending_workflow_and_cancels_acti
         lambda args, kwargs, serialization, serializer: ("serialized-override", "py_pickle"),
     )
 
-    response = manager._stage_input_override_fork_sync(
+    response = manager._stage_edited_fork_sync(
         "wf-1",
         0,
         {"name": "Ada"},
+        None,
         "wf-override",
         True,
         "executor-1",
         "v-ready",
     )
 
-    insert_statement = captured["statements"][0]
-    insert_params = insert_statement.compile().params
-    source_lineage_update = captured["statements"][1]
-    source_cancel_update = captured["statements"][2]
+    staged_update = captured["statements"][0]
+    workflow_input_update = captured["statements"][1]
+    source_lineage_update = captured["statements"][2]
+    source_cancel_update = captured["statements"][3]
+    staged_params = staged_update.compile().params
+    workflow_input_params = workflow_input_update.compile().params
     source_cancel_params = source_cancel_update.compile().params
 
     assert captured["system_database_url"] == "postgres://postgres:dbos@postgres:5432/dbos_starter"
-    assert insert_params["workflow_uuid"] == "wf-override"
-    assert insert_params["status"] == "PENDING"
-    assert insert_params["name"] == "dbos_workflow"
-    assert insert_params["application_version"] == "v-ready"
-    assert insert_params["application_id"] == "dbos-starter"
-    assert insert_params["executor_id"] == "executor-1"
-    assert insert_params["inputs"] == "serialized-override"
-    assert insert_params["serialization"] == "py_pickle"
-    assert insert_params["forked_from"] == "wf-1"
-    assert insert_params["queue_name"] is None
-    assert insert_params["priority"] == 0
-    assert insert_params["authenticated_roles"] == json.dumps(["admin"])
+    assert captured["fork_calls"] == [
+        {
+            "original_ids": ["wf-1"],
+            "forked_ids": ["wf-override"],
+            "start_steps": [0],
+            "application_version": "v-ready",
+            "queue_name": None,
+        }
+    ]
+    assert staged_params["status"] == "PENDING"
+    assert staged_params["executor_id"] == "executor-1"
+    assert workflow_input_params["inputs"] == "serialized-override"
+    assert workflow_input_params["serialization"] == "py_pickle"
     assert "was_forked_from" in str(source_lineage_update)
     assert source_cancel_params["status"] == "CANCELLED"
     assert sorted(source_cancel_params["status_1"]) == ["DELAYED", "ENQUEUED", "PENDING"]
     assert response == {
         "new_workflow_id": "wf-override",
-        "stage_mode": "input_override_fork",
+        "stage_mode": "edited_fork",
         "source_workflow_id": "wf-1",
-        "input_override": {"name": "Ada"},
+        "workflow_input_override": {"name": "Ada"},
+        "step_output_overrides": {},
+        "patched_step_ids": [],
+        "start_step": 0,
         "workflow_status": "PENDING",
         "requires_manual_execution": True,
         "cancel_original_if_active": True,
@@ -466,16 +486,20 @@ def test_stage_input_override_fork_sync_stages_pending_workflow_and_cancels_acti
     assert captured["destroyed"] is True
 
 
-def test_stage_input_override_fork_sync_requires_step_zero() -> None:
-    manager = ConductorManager(app_name="dbos-starter", conductor_key="local-conductor-key")
+def test_stage_edited_fork_sync_requires_restart_boundary_for_workflow_input_override() -> None:
+    manager = ConductorManager(
+        app_name="dbos-starter",
+        conductor_key="local-conductor-key",
+        system_database_url="postgres://postgres:dbos@postgres:5432/dbos_starter",
+    )
 
     with pytest.raises(ValueError) as exc_info:
-        manager._stage_input_override_fork_sync("wf-1", 2, {"name": "Ada"}, None, False, "executor-1", "v1")
+        manager._stage_edited_fork_sync("wf-1", 2, {"name": "Ada"}, None, None, False, "executor-1", "v1")
 
-    assert str(exc_info.value) == "input_override rerun only supports start_step 0"
+    assert str(exc_info.value) == "workflow_input_override requires start_step 0"
 
 
-def test_stage_input_override_fork_sync_preserves_positive_priority(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stage_edited_fork_sync_patches_preserved_step_outputs(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = ConductorManager(
         app_name="dbos-starter",
         conductor_key="local-conductor-key",
@@ -483,7 +507,7 @@ def test_stage_input_override_fork_sync_preserves_positive_priority(monkeypatch:
     )
 
     source_status = {
-        "status": "PENDING",
+        "status": "ERROR",
         "name": "dbos_workflow",
         "class_name": None,
         "config_name": None,
@@ -508,6 +532,7 @@ def test_stage_input_override_fork_sync_preserves_positive_priority(monkeypatch:
             self._serializer = object()
             self._sys_db = SimpleNamespace(
                 get_workflow_status=lambda workflow_id: source_status,
+                fork_workflow=lambda original_ids, forked_ids, start_steps, application_version, queue_name=None: None,
                 engine=SimpleNamespace(begin=lambda: _DummyBeginContext(captured)),
             )
 
@@ -516,21 +541,34 @@ def test_stage_input_override_fork_sync_preserves_positive_priority(monkeypatch:
 
     monkeypatch.setattr("control_plane.state.DBOSClient", DummyClient)
     monkeypatch.setattr(
-        "control_plane.state.deserialize_args",
-        lambda inputs, serialization, serializer: {"args": (), "kwargs": {"name": "world"}},
+        "control_plane.state.deserialize_value",
+        lambda serialized_value, serialization, serializer: 5,
     )
     monkeypatch.setattr(
-        "control_plane.state._serialize_workflow_inputs",
-        lambda args, kwargs, serialization, serializer: ("serialized-override", "py_pickle"),
+        "control_plane.state.serialize_value_as",
+        lambda value, serialization, serializer: ("serialized-step-override", "py_pickle"),
     )
 
-    manager._stage_input_override_fork_sync("wf-1", 0, {"name": "Ada"}, None, False, "executor-1", "v1")
+    captured["fetchone_results"] = [SimpleNamespace(function_name="step_one", serialization="py_pickle", output="serialized-step")]
 
-    insert_statement = captured["statements"][0]
-    assert insert_statement.compile().params["priority"] == 7
+    response = manager._stage_edited_fork_sync(
+        "wf-1",
+        2,
+        None,
+        {"1": 3},
+        None,
+        False,
+        "executor-1",
+        "v1",
+    )
+
+    step_patch_update = captured["statements"][2]
+    assert step_patch_update.compile().params["output"] == "serialized-step-override"
+    assert response["patched_step_ids"] == [1]
+    assert response["step_output_overrides"] == {"1": 3}
 
 
-def test_stage_input_override_fork_sync_leaves_terminal_source_unchanged_when_cancel_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stage_edited_fork_sync_leaves_terminal_source_unchanged_when_cancel_requested(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = ConductorManager(
         app_name="dbos-starter",
         conductor_key="local-conductor-key",
@@ -564,6 +602,7 @@ def test_stage_input_override_fork_sync_leaves_terminal_source_unchanged_when_ca
             self._serializer = object()
             self._sys_db = SimpleNamespace(
                 get_workflow_status=lambda workflow_id: source_status,
+                fork_workflow=lambda original_ids, forked_ids, start_steps, application_version, queue_name=None: None,
                 engine=SimpleNamespace(begin=lambda: _DummyBeginContext(captured)),
             )
 
@@ -571,16 +610,7 @@ def test_stage_input_override_fork_sync_leaves_terminal_source_unchanged_when_ca
             return None
 
     monkeypatch.setattr("control_plane.state.DBOSClient", DummyClient)
-    monkeypatch.setattr(
-        "control_plane.state.deserialize_args",
-        lambda inputs, serialization, serializer: {"args": (), "kwargs": {"name": "world"}},
-    )
-    monkeypatch.setattr(
-        "control_plane.state._serialize_workflow_inputs",
-        lambda args, kwargs, serialization, serializer: ("serialized-override", "py_pickle"),
-    )
-
-    response = manager._stage_input_override_fork_sync("wf-1", 0, {"name": "Ada"}, None, True, "executor-1", "v1")
+    response = manager._stage_edited_fork_sync("wf-1", 0, None, None, None, True, "executor-1", "v1")
 
     source_cancel_update = captured["statements"][2]
     source_cancel_params = source_cancel_update.compile().params
@@ -589,7 +619,7 @@ def test_stage_input_override_fork_sync_leaves_terminal_source_unchanged_when_ca
     assert response["source_workflow_cancelled"] is False
 
 
-def test_stage_input_override_fork_sync_skips_cancel_update_when_not_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stage_edited_fork_sync_skips_cancel_update_when_not_requested(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = ConductorManager(
         app_name="dbos-starter",
         conductor_key="local-conductor-key",
@@ -622,6 +652,7 @@ def test_stage_input_override_fork_sync_skips_cancel_update_when_not_requested(m
             self._serializer = object()
             self._sys_db = SimpleNamespace(
                 get_workflow_status=lambda workflow_id: source_status,
+                fork_workflow=lambda original_ids, forked_ids, start_steps, application_version, queue_name=None: None,
                 engine=SimpleNamespace(begin=lambda: _DummyBeginContext(captured)),
             )
 
@@ -629,16 +660,7 @@ def test_stage_input_override_fork_sync_skips_cancel_update_when_not_requested(m
             return None
 
     monkeypatch.setattr("control_plane.state.DBOSClient", DummyClient)
-    monkeypatch.setattr(
-        "control_plane.state.deserialize_args",
-        lambda inputs, serialization, serializer: {"args": (), "kwargs": {"name": "world"}},
-    )
-    monkeypatch.setattr(
-        "control_plane.state._serialize_workflow_inputs",
-        lambda args, kwargs, serialization, serializer: ("serialized-override", "py_pickle"),
-    )
-
-    response = manager._stage_input_override_fork_sync("wf-1", 0, {"name": "Ada"}, None, False, "executor-1", "v1")
+    response = manager._stage_edited_fork_sync("wf-1", 0, None, None, None, False, "executor-1", "v1")
 
     assert len(captured["statements"]) == 2
     assert response["source_workflow_cancelled"] is False
@@ -735,7 +757,12 @@ class _DummyConnection:
     def execute(self, statement):
         assert isinstance(statement, sa.sql.Executable)
         self.captured.setdefault("statements", []).append(statement)
+        is_select = getattr(statement, "is_select", False)
+        fetchone_results = self.captured.get("fetchone_results")
+        if is_select and isinstance(fetchone_results, list) and fetchone_results:
+            row = fetchone_results.pop(0)
+            return SimpleNamespace(fetchone=lambda: row, rowcount=1)
         rowcounts = self.captured.get("rowcounts")
         if isinstance(rowcounts, list) and rowcounts:
             return SimpleNamespace(rowcount=rowcounts.pop(0))
-        return SimpleNamespace(rowcount=1)
+        return SimpleNamespace(rowcount=1, fetchone=lambda: None)

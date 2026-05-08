@@ -16,6 +16,15 @@ def _validate_input_override(value: Any) -> dict[str, Any]:
     return value
 
 
+def _validate_step_output_overrides(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="step_output_overrides must be a JSON object keyed by step id",
+        )
+    return value
+
+
 def _derive_input_override_seed(workflow_output: Any) -> dict[str, Any] | None:
     if not isinstance(workflow_output, dict):
         return None
@@ -102,12 +111,12 @@ async def get_workflow(
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    input_override_seed = _derive_input_override_seed(record.response_payload.get("output"))
+    workflow_input_seed = _derive_input_override_seed(record.response_payload.get("output"))
     return {
         "request_id": record.request_id,
         "status": record.status,
         "response": record.response_payload,
-        "input_override_seed": input_override_seed,
+        "workflow_input_seed": workflow_input_seed,
     }
 
 
@@ -243,15 +252,26 @@ async def fork_workflow(
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="start_step must be an integer") from exc
 
-    input_override = data.get("input_override")
-    if input_override is not None:
-        if parsed_start_step != 0:
-            raise HTTPException(status_code=400, detail="input_override requires start_step 0")
+    workflow_input_override = data.get("workflow_input_override")
+    if workflow_input_override is None and "input_override" in data:
+        workflow_input_override = data.get("input_override")
+    step_output_overrides = data.get("step_output_overrides")
+
+    if workflow_input_override is not None or step_output_overrides is not None:
         try:
-            record = await request.app.state.conductor_manager.stage_input_override_fork(
+            record = await request.app.state.conductor_manager.stage_edited_fork(
                 workflow_id,
                 parsed_start_step,
-                input_override=_validate_input_override(input_override),
+                workflow_input_override=(
+                    _validate_input_override(workflow_input_override)
+                    if workflow_input_override is not None
+                    else None
+                ),
+                step_output_overrides=(
+                    _validate_step_output_overrides(step_output_overrides)
+                    if step_output_overrides is not None
+                    else None
+                ),
                 new_workflow_id=data.get("new_workflow_id") or None,
                 cancel_original_if_active=bool(data.get("cancel_original_if_active", False)),
             )

@@ -15,7 +15,7 @@ class FakeRecord:
 class FakeManager:
     def __init__(self) -> None:
         self.last_fork_call = None
-        self.last_stage_input_override_fork_call = None
+        self.last_stage_edited_fork_call = None
         self.last_execute_staged_fork_call = None
 
     async def snapshot(self):
@@ -98,19 +98,21 @@ class FakeManager:
             response_payload={"new_workflow_id": new_workflow_id or "generated-fork-id"},
         )
 
-    async def stage_input_override_fork(
+    async def stage_edited_fork(
         self,
         workflow_id,
         start_step,
         *,
-        input_override,
+        workflow_input_override=None,
+        step_output_overrides=None,
         new_workflow_id=None,
         cancel_original_if_active=False,
     ):
-        self.last_stage_input_override_fork_call = {
+        self.last_stage_edited_fork_call = {
             "workflow_id": workflow_id,
             "start_step": start_step,
-            "input_override": input_override,
+            "workflow_input_override": workflow_input_override,
+            "step_output_overrides": step_output_overrides,
             "new_workflow_id": new_workflow_id,
             "cancel_original_if_active": cancel_original_if_active,
         }
@@ -119,7 +121,7 @@ class FakeManager:
             status="succeeded",
             response_payload={
                 "new_workflow_id": new_workflow_id or "generated-override-id",
-                "stage_mode": "input_override_fork",
+                "stage_mode": "edited_fork",
                 "requires_manual_execution": True,
             },
         )
@@ -199,7 +201,7 @@ def test_http_routes_delegate_to_manager() -> None:
         assert queued_response.json()["request_id"] == "req-queued"
         assert workflow_response.status_code == 200
         assert workflow_response.json()["request_id"] == "req-get"
-        assert workflow_response.json()["input_override_seed"] == {"name": "world"}
+        assert workflow_response.json()["workflow_input_seed"] == {"name": "world"}
         assert steps_response.status_code == 200
         assert steps_response.json()["request_id"] == "req-steps"
         assert recovery_response.status_code == 200
@@ -272,10 +274,10 @@ def test_get_workflow_returns_no_input_override_seed_when_input_is_not_parseable
         )
 
         assert response.status_code == 200
-        assert response.json()["input_override_seed"] is None
+        assert response.json()["workflow_input_seed"] is None
 
 
-def test_fork_route_uses_local_rerun_for_input_override() -> None:
+def test_fork_route_uses_local_staged_edit_flow_for_workflow_input_override() -> None:
     app = create_control_plane_app()
     manager = FakeManager()
     app.state.conductor_manager = manager
@@ -287,7 +289,7 @@ def test_fork_route_uses_local_rerun_for_input_override() -> None:
                 "workflow_id": "wf-1",
                 "start_step": 0,
                 "new_workflow_id": "wf-override",
-                "input_override": {"name": "Ada"},
+                "workflow_input_override": {"name": "Ada"},
                 "cancel_original_if_active": True,
             },
         )
@@ -296,14 +298,44 @@ def test_fork_route_uses_local_rerun_for_input_override() -> None:
         assert response.json()["request_id"] == "req-override"
         assert response.json()["response"] == {
             "new_workflow_id": "wf-override",
-            "stage_mode": "input_override_fork",
+            "stage_mode": "edited_fork",
             "requires_manual_execution": True,
         }
-        assert manager.last_stage_input_override_fork_call == {
+        assert manager.last_stage_edited_fork_call == {
             "workflow_id": "wf-1",
             "start_step": 0,
-            "input_override": {"name": "Ada"},
+            "workflow_input_override": {"name": "Ada"},
+            "step_output_overrides": None,
             "new_workflow_id": "wf-override",
+            "cancel_original_if_active": True,
+        }
+        assert manager.last_fork_call is None
+
+
+def test_fork_route_uses_local_staged_edit_flow_for_checkpoint_override() -> None:
+    app = create_control_plane_app()
+    manager = FakeManager()
+    app.state.conductor_manager = manager
+
+    with create_control_plane_client().__class__(app) as client:
+        response = client.post(
+            "/api/control-plane/fork",
+            json={
+                "workflow_id": "wf-1",
+                "start_step": 2,
+                "step_output_overrides": {"1": 3},
+                "cancel_original_if_active": True,
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["request_id"] == "req-override"
+        assert manager.last_stage_edited_fork_call == {
+            "workflow_id": "wf-1",
+            "start_step": 2,
+            "workflow_input_override": None,
+            "step_output_overrides": {"1": 3},
+            "new_workflow_id": None,
             "cancel_original_if_active": True,
         }
         assert manager.last_fork_call is None
@@ -316,7 +348,7 @@ def test_fork_route_returns_not_found_for_missing_override_source() -> None:
     async def fake_missing_source(*args, **kwargs):
         raise LookupError("Unknown workflow_id: wf-missing")
 
-    manager.stage_input_override_fork = fake_missing_source
+    manager.stage_edited_fork = fake_missing_source
     app.state.conductor_manager = manager
 
     with create_control_plane_client().__class__(app) as client:
@@ -325,7 +357,7 @@ def test_fork_route_returns_not_found_for_missing_override_source() -> None:
             json={
                 "workflow_id": "wf-missing",
                 "start_step": 0,
-                "input_override": {"name": "Ada"},
+                "workflow_input_override": {"name": "Ada"},
             },
         )
 
@@ -363,7 +395,7 @@ def test_fork_route_validates_input_override_shape() -> None:
             json={
                 "workflow_id": "wf-1",
                 "start_step": 0,
-                "input_override": "name=Ada",
+                "workflow_input_override": "name=Ada",
             },
         )
 
@@ -371,7 +403,7 @@ def test_fork_route_validates_input_override_shape() -> None:
         assert response.json()["detail"] == "input_override must be a JSON object"
 
 
-def test_fork_route_requires_restart_boundary_for_input_override() -> None:
+def test_fork_route_validates_step_output_override_shape() -> None:
     app = create_control_plane_app()
     app.state.conductor_manager = FakeManager()
 
@@ -381,12 +413,12 @@ def test_fork_route_requires_restart_boundary_for_input_override() -> None:
             json={
                 "workflow_id": "wf-1",
                 "start_step": 2,
-                "input_override": {"name": "Ada"},
+                "step_output_overrides": ["bad"],
             },
         )
 
         assert response.status_code == 400
-        assert response.json()["detail"] == "input_override requires start_step 0"
+        assert response.json()["detail"] == "step_output_overrides must be a JSON object keyed by step id"
 
 
 def test_routes_validate_required_workflow_id() -> None:

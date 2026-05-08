@@ -1046,6 +1046,49 @@ button { font-family: inherit; cursor: pointer; }
 .fork-input:focus      { border-color: rgba(245, 158, 11, 0.45); }
 .fork-input::placeholder { color: var(--text-3); }
 
+.fork-step-overrides {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+  max-width: 460px;
+}
+
+.fork-step-overrides-empty {
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 10px 0;
+}
+
+.fork-step-edit-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 10px;
+}
+
+.fork-step-edit-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.fork-step-edit-title {
+  font-size: 11px;
+  color: var(--text-1);
+}
+
+.fork-step-edit-hint {
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.fork-step-edit-input {
+  max-width: none;
+  width: 100%;
+}
+
 .fork-foot-right {
   display: flex;
   align-items: center;

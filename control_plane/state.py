@@ -10,7 +10,13 @@ from fastapi import WebSocket
 
 from dbos._client import DBOSClient
 from dbos._schemas.system_database import SystemSchema
-from dbos._serialization import DBOSDefaultSerializer, DBOSPortableJSON, deserialize_args
+from dbos._serialization import (
+    DBOSDefaultSerializer,
+    DBOSPortableJSON,
+    deserialize_args,
+    deserialize_value,
+    serialize_value_as,
+)
 import sqlalchemy as sa
 
 from . import protocol
@@ -234,32 +240,35 @@ class ConductorManager:
             )
             return record
 
-    async def stage_input_override_fork(
+    async def stage_edited_fork(
         self,
         workflow_id: str,
         start_step: int,
         *,
-        input_override: dict[str, Any],
+        workflow_input_override: dict[str, Any] | None = None,
+        step_output_overrides: dict[str, Any] | None = None,
         new_workflow_id: str | None = None,
         cancel_original_if_active: bool = False,
     ) -> ConductorRequestRecord:
         executor_id, application_version = await self._require_ready_executor_target()
         response_payload = await asyncio.to_thread(
-            self._stage_input_override_fork_sync,
+            self._stage_edited_fork_sync,
             workflow_id,
             start_step,
-            input_override,
+            workflow_input_override,
+            step_output_overrides,
             new_workflow_id,
             cancel_original_if_active,
             executor_id,
             application_version,
         )
         return await self.record_local_action(
-            "stage_input_override_fork",
+            "stage_edited_fork",
             {
                 "workflow_id": workflow_id,
                 "start_step": start_step,
-                "input_override": input_override,
+                "workflow_input_override": workflow_input_override,
+                "step_output_overrides": step_output_overrides,
                 "new_workflow_id": new_workflow_id,
                 "cancel_original_if_active": cancel_original_if_active,
             },
@@ -293,20 +302,26 @@ class ConductorManager:
             },
         )
 
-    def _stage_input_override_fork_sync(
+    def _stage_edited_fork_sync(
         self,
         workflow_id: str,
         start_step: int,
-        input_override: dict[str, Any],
+        workflow_input_override: dict[str, Any] | None,
+        step_output_overrides: dict[str, Any] | None,
         new_workflow_id: str | None,
         cancel_original_if_active: bool,
         executor_id: str,
         application_version: str,
     ) -> dict[str, Any]:
-        if start_step != 0:
-            raise ValueError("input_override rerun only supports start_step 0")
         if self.system_database_url is None:
             raise RuntimeError("Control plane system database URL is not configured")
+
+        normalized_input_override = (
+            dict(workflow_input_override) if workflow_input_override is not None else None
+        )
+        normalized_step_overrides = _normalize_step_output_overrides(step_output_overrides)
+        if normalized_input_override is not None and start_step != 0:
+            raise ValueError("workflow_input_override requires start_step 0")
 
         client = DBOSClient(system_database_url=self.system_database_url)
         try:
@@ -314,66 +329,73 @@ class ConductorManager:
             if source_status is None:
                 raise LookupError(f"Unknown workflow_id: {workflow_id}")
             if source_status.get("parent_workflow_id") is not None:
-                raise RuntimeError("input_override fork does not yet support child workflows")
+                raise RuntimeError("edited fork does not yet support child workflows")
 
-            workflow_inputs = deserialize_args(
-                source_status["inputs"],
-                source_status.get("serialization"),
-                client._serializer,
-            )
-            args = tuple(workflow_inputs.get("args") or ())
-            kwargs = dict(input_override)
-
-            source_serialization = source_status.get("serialization")
-            serialized_inputs, serialization = _serialize_workflow_inputs(
-                args,
-                kwargs,
-                source_serialization,
-                client._serializer,
-            )
             new_workflow_uuid = new_workflow_id or protocol.new_request_id()
             current_time_ms = utc_now_epoch_ms()
-
-            replacement_status = {
-                "workflow_uuid": new_workflow_uuid,
-                "status": "PENDING",
-                "name": source_status["name"],
-                "authenticated_user": source_status.get("authenticated_user"),
-                "assumed_role": source_status.get("assumed_role"),
-                "authenticated_roles": source_status.get("authenticated_roles"),
-                "output": None,
-                "error": None,
-                "executor_id": executor_id,
-                "created_at": current_time_ms,
-                "updated_at": current_time_ms,
-                "application_version": application_version,
-                "application_id": source_status.get("app_id") or self.app_name,
-                "class_name": source_status.get("class_name"),
-                "config_name": source_status.get("config_name"),
-                "recovery_attempts": 0,
-                "queue_name": None,
-                "workflow_timeout_ms": source_status.get("workflow_timeout_ms"),
-                "workflow_deadline_epoch_ms": None,
-                "started_at_epoch_ms": None,
-                "deduplication_id": None,
-                "inputs": serialized_inputs,
-                "priority": source_status.get("priority")
-                if isinstance(source_status.get("priority"), int)
-                else 0,
-                "queue_partition_key": None,
-                "forked_from": workflow_id,
-                "was_forked_from": False,
-                "owner_xid": None,
-                "parent_workflow_id": source_status.get("parent_workflow_id"),
-                "serialization": serialization,
-                "delay_until_epoch_ms": None,
-                "rate_limited": False,
-            }
             source_status_value = source_status.get("status")
             source_is_active = source_status_value in ACTIVE_SOURCE_STATUSES
 
             with client._sys_db.engine.begin() as conn:
-                conn.execute(sa.insert(SystemSchema.workflow_status).values(**replacement_status))
+                client._sys_db.fork_workflow(
+                    [workflow_id],
+                    [new_workflow_uuid],
+                    [start_step],
+                    application_version=application_version,
+                    queue_name=None,
+                )
+                conn.execute(
+                    sa.update(SystemSchema.workflow_status)
+                    .where(SystemSchema.workflow_status.c.workflow_uuid == new_workflow_uuid)
+                    .values(
+                        status="PENDING",
+                        queue_name=None,
+                        executor_id=executor_id,
+                        updated_at=current_time_ms,
+                        workflow_deadline_epoch_ms=None,
+                        started_at_epoch_ms=None,
+                        delay_until_epoch_ms=None,
+                        rate_limited=False,
+                        output=None,
+                        error=None,
+                        recovery_attempts=0,
+                        deduplication_id=None,
+                    )
+                )
+
+                if normalized_input_override is not None:
+                    serialized_inputs, serialization = _build_workflow_input_override(
+                        source_status,
+                        normalized_input_override,
+                        client._serializer,
+                    )
+                    conn.execute(
+                        sa.update(SystemSchema.workflow_status)
+                        .where(SystemSchema.workflow_status.c.workflow_uuid == new_workflow_uuid)
+                        .values(
+                            inputs=serialized_inputs,
+                            serialization=serialization,
+                            updated_at=current_time_ms,
+                        )
+                    )
+
+                patched_step_ids: list[int] = []
+                for function_id, output_override in normalized_step_overrides.items():
+                    if function_id >= start_step:
+                        raise ValueError(
+                            f"step_output_overrides only supports preserved steps before start_step {start_step}"
+                        )
+                    patched_step_ids.append(
+                        _patch_forked_step_output(
+                            conn,
+                            source_workflow_id=workflow_id,
+                            forked_workflow_id=new_workflow_uuid,
+                            function_id=function_id,
+                            serializer=client._serializer,
+                            output_override=output_override,
+                        )
+                    )
+
                 conn.execute(
                     sa.update(SystemSchema.workflow_status)
                     .where(SystemSchema.workflow_status.c.workflow_uuid == workflow_id)
@@ -402,9 +424,15 @@ class ConductorManager:
 
             return {
                 "new_workflow_id": new_workflow_uuid,
-                "stage_mode": "input_override_fork",
+                "stage_mode": "edited_fork",
                 "source_workflow_id": workflow_id,
-                "input_override": input_override,
+                "workflow_input_override": normalized_input_override,
+                "step_output_overrides": {
+                    str(function_id): normalized_step_overrides[function_id]
+                    for function_id in sorted(normalized_step_overrides)
+                },
+                "patched_step_ids": sorted(patched_step_ids),
+                "start_step": start_step,
                 "workflow_status": "PENDING",
                 "requires_manual_execution": True,
                 "cancel_original_if_active": cancel_original_if_active,
@@ -466,10 +494,10 @@ class ConductorManager:
         new_workflow_id: str | None = None,
         cancel_original_if_active: bool = False,
     ) -> ConductorRequestRecord:
-        return await self.stage_input_override_fork(
+        return await self.stage_edited_fork(
             workflow_id,
             start_step,
-            input_override=input_override,
+            workflow_input_override=input_override,
             new_workflow_id=new_workflow_id,
             cancel_original_if_active=cancel_original_if_active,
         )
@@ -682,3 +710,94 @@ def _serialize_workflow_inputs(
     if serialization is not None and serialization != serializer.name():
         raise RuntimeError(f"Serialization {serialization} is not available")
     return serializer.serialize({"args": args, "kwargs": kwargs}), serializer.name()
+
+
+def _build_workflow_input_override(
+    source_status: dict[str, Any],
+    workflow_input_override: dict[str, Any],
+    serializer: Any,
+) -> tuple[str, str]:
+    workflow_inputs = deserialize_args(
+        source_status["inputs"],
+        source_status.get("serialization"),
+        serializer,
+    )
+    args = tuple(workflow_inputs.get("args") or ())
+    kwargs = dict(workflow_input_override)
+    return _serialize_workflow_inputs(
+        args,
+        kwargs,
+        source_status.get("serialization"),
+        serializer,
+    )
+
+
+def _normalize_step_output_overrides(
+    step_output_overrides: dict[str, Any] | None,
+) -> dict[int, Any]:
+    if step_output_overrides is None:
+        return {}
+    normalized: dict[int, Any] = {}
+    for raw_function_id, value in step_output_overrides.items():
+        try:
+            function_id = int(raw_function_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("step_output_overrides keys must be integer step ids") from exc
+        if function_id < 0:
+            raise ValueError("step_output_overrides keys must be non-negative step ids")
+        normalized[function_id] = value
+    return normalized
+
+
+def _patch_forked_step_output(
+    conn: sa.Connection,
+    *,
+    source_workflow_id: str,
+    forked_workflow_id: str,
+    function_id: int,
+    output_override: Any,
+    serializer: Any,
+) -> int:
+    step_row = conn.execute(
+        sa.select(
+            SystemSchema.operation_outputs.c.function_name,
+            SystemSchema.operation_outputs.c.serialization,
+            SystemSchema.operation_outputs.c.output,
+        )
+        .where(SystemSchema.operation_outputs.c.workflow_uuid == source_workflow_id)
+        .where(SystemSchema.operation_outputs.c.function_id == function_id)
+    ).fetchone()
+    if step_row is None:
+        raise LookupError(
+            f"Cannot override missing step output for function_id {function_id}"
+        )
+
+    if step_row.output is None:
+        raise ValueError(f"Step {function_id} has no recorded output to override")
+
+    original_value = deserialize_value(step_row.output, step_row.serialization, serializer)
+    if type(output_override) is not type(original_value):
+        raise ValueError(
+            f"Step {function_id} override type {type(output_override).__name__} does not match recorded output type {type(original_value).__name__}"
+        )
+
+    serialized_output, serialization = serialize_value_as(
+        output_override,
+        step_row.serialization,
+        serializer,
+    )
+    update_result = conn.execute(
+        sa.update(SystemSchema.operation_outputs)
+        .where(SystemSchema.operation_outputs.c.workflow_uuid == forked_workflow_id)
+        .where(SystemSchema.operation_outputs.c.function_id == function_id)
+        .values(
+            output=serialized_output,
+            error=None,
+            serialization=serialization,
+        )
+    )
+    if update_result.rowcount != 1:
+        raise LookupError(
+            f"Forked workflow is missing preserved step output for function_id {function_id}"
+        )
+    return function_id
