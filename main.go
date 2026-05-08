@@ -14,7 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))
+var logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 func envFlag(name string, defaultValue bool) bool {
 	raw, ok := os.LookupEnv(name)
@@ -32,7 +32,7 @@ func envFlag(name string, defaultValue bool) bool {
 func configureLogging() (string, bool) {
 	levelName := strings.ToLower(strings.TrimSpace(os.Getenv("APP_LOG_LEVEL")))
 	if levelName == "" {
-		levelName = "warning"
+		levelName = "info"
 	}
 
 	level := slog.LevelWarn
@@ -50,6 +50,7 @@ func configureLogging() (string, bool) {
 }
 
 func workflow(ctx dbos.DBOSContext, name string) (string, error) {
+	logger.Info("starting workflow", "name", name)
 	nameLengthAny, err := dbos.RunAsStep(ctx, func(stepCtx context.Context) (any, error) {
 		return stepOne(stepCtx, name)
 	})
@@ -64,6 +65,7 @@ func workflow(ctx dbos.DBOSContext, name string) (string, error) {
 
 	existingFile := filepath.Join(".", "existing.txt")
 	if _, statErr := os.Stat(existingFile); os.IsNotExist(statErr) {
+		logger.Warn("existing.txt missing; creating it and exiting to simulate a crash")
 		file, createErr := os.Create(existingFile)
 		if createErr != nil {
 			return "", createErr
@@ -81,6 +83,7 @@ func workflow(ctx dbos.DBOSContext, name string) (string, error) {
 		return "", err
 	}
 
+	logger.Info("completed workflow", "name", name)
 	return "workflow executed", nil
 }
 

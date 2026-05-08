@@ -79,6 +79,8 @@ CONTROL_PLANE_LOG_LEVEL=info CONTROL_PLANE_ACCESS_LOG=true \
 docker compose up --build
 ```
 
+Default behavior keeps workflow and lifecycle logs at `info` while leaving HTTP access logs off.
+
 ## Try the recovery flow
 
 1. Start the stack with `docker compose up --build`.
