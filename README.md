@@ -49,6 +49,15 @@ That does not mean DBOS replaces Kafka for every case. Kafka is still a strong f
 
 The whole sample is containerized. You only need Docker and Docker Compose on the host.
 
+The control-plane runs as a separate prebuilt image sourced from the [`dbos-control-plane`](https://github.com/jamesforwardnwboxed/dbos-control-plane) repo. Build it once locally before starting the stack:
+
+```bash
+git clone https://github.com/jamesforwardnwboxed/dbos-control-plane.git
+docker build -t dbos-control-plane:latest dbos-control-plane
+```
+
+Then bring up the stack from this repo:
+
 ```bash
 docker compose up --build
 ```
@@ -56,9 +65,11 @@ docker compose up --build
 This starts:
 
 - the app container
+- the control-plane container (DBOS conductor + dashboard)
 - a Postgres container for the DBOS system database
 
 The app is available at `http://localhost:8000`.
+The control-plane UI is available at `http://localhost:8001`.
 
 ## Try the recovery flow
 

@@ -59,9 +59,15 @@ func stepTwo(ctx context.Context, name string, nameLength int) (string, error) {
 }
 
 func main() {
+	appName := os.Getenv("DBOS_APP_NAME")
+	if appName == "" {
+		appName = "dbos-starter"
+	}
 	dbosContext, err := dbos.NewDBOSContext(context.Background(), dbos.Config{
-		AppName:     "dbos-starter",
-		DatabaseURL: os.Getenv("DBOS_SYSTEM_DATABASE_URL"),
+		AppName:         appName,
+		DatabaseURL:     os.Getenv("DBOS_SYSTEM_DATABASE_URL"),
+		ConductorAPIKey: os.Getenv("DBOS_CONDUCTOR_KEY"),
+		ConductorURL:    os.Getenv("DBOS_CONDUCTOR_URL"),
 	})
 	if err != nil {
 		panic(fmt.Sprintf("initializing DBOS failed: %v", err))
