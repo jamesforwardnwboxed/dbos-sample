@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DBOS Control Plane</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="topbar-left">
+      <svg class="logo-hex" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M12 2L21.196 7.5V16.5L12 22L2.804 16.5V7.5L12 2Z" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M12 7L16.196 9.5V14.5L12 17L7.804 14.5V9.5L12 7Z" fill="currentColor" opacity="0.5"/>
+      </svg>
+      <div class="brand">
+        <span class="brand-name">DBOS</span>
+        <span class="brand-sep">/</span>
+        <span class="brand-sub">Control Plane</span>
+      </div>
+      <span class="shim-pill">local shim</span>
+    </div>
+    <div class="topbar-right">
+      <div id="connection-status" class="conn-pill conn-none">
+        <span class="conn-dot"></span>
+        <span id="conn-label">No connection</span>
+      </div>
+      <div class="clock-wrap">
+        <span class="clock-label">polled</span>
+        <span id="poll-clock" class="clock-value">—</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <section class="session-strip" id="session-strip" hidden>
+      <div class="sess-field">
+        <span class="sess-label">Application</span>
+        <span id="sess-app" class="sess-value">—</span>
+      </div>
+      <div class="sess-divider"></div>
+      <div class="sess-field">
+        <span class="sess-label">Executor ID</span>
+        <span id="sess-executor-id" class="sess-value mono">—</span>
+      </div>
+      <div class="sess-divider"></div>
+      <div class="sess-field">
+        <span class="sess-label">App Version</span>
+        <span id="sess-app-version" class="sess-value mono">—</span>
+      </div>
+      <div class="sess-divider"></div>
+      <div class="sess-field">
+        <span class="sess-label">Session ID</span>
+        <span id="sess-session-id" class="sess-value mono dim" title=""></span>
+      </div>
+      <div class="sess-divider"></div>
+      <div class="sess-field">
+        <span class="sess-label">Connected</span>
+        <span id="sess-connected-at" class="sess-value">—</span>
+      </div>
+      <div class="sess-divider"></div>
+      <div class="sess-field">
+        <span class="sess-label">Last Seen</span>
+        <span id="sess-last-seen" class="sess-value">—</span>
+      </div>
+    </section>
+
+    <div id="no-conn-notice" class="notice">
+      <span class="notice-icon">○</span>
+      <span>
+        Waiting for executor to connect.
+        The DBOS app runtime connects to this shim via WebSocket at
+        <code>/websocket/{app_name}/{conductor_key}</code>.
+        Start the app service to establish a session.
+      </span>
+    </div>
+
+    <div class="actions-bar">
+      <div class="actions-left">
+        <button class="btn" id="btn-list-workflows" disabled>
+          <span class="btn-icon">↻</span>List Workflows
+        </button>
+        <button class="btn" id="btn-list-queued" disabled>
+          <span class="btn-icon">≡</span>List Queued
+        </button>
+        <button class="btn btn-warn" id="btn-recovery" disabled>
+          <span class="btn-icon">⟳</span>Trigger Recovery
+        </button>
+      </div>
+      <div id="action-msg" class="action-msg" hidden></div>
+    </div>
+
+    <div class="two-col">
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Event Stream</h2>
+          <span id="event-count" class="panel-badge">0</span>
+          <span class="panel-hint">newest first · last 25</span>
+        </div>
+        <div id="event-log" class="event-log">
+          <div class="empty-hint">No events yet</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Request Log</h2>
+          <span id="request-count" class="panel-badge">0</span>
+          <span class="panel-hint">newest first</span>
+        </div>
+        <div id="request-log" class="request-log">
+          <div class="empty-hint">No requests yet</div>
+        </div>
+      </section>
+
+    </div>
+
+    <section class="panel panel-workflows">
+      <div class="panel-head">
+        <h2 class="panel-title">Workflows</h2>
+        <span id="workflow-count" class="panel-badge">0</span>
+        <span class="panel-hint">last list_workflows result</span>
+      </div>
+      <div id="workflow-list" class="workflow-area">
+        <div class="empty-hint">No workflow data — use "List Workflows" to fetch.</div>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="inspect-overlay" style="display:none">
+    <div class="inspect-backdrop" id="inspect-backdrop"></div>
+    <div class="inspect-box">
+      <div class="inspect-head">
+        <span class="inspect-title" id="inspect-title">Workflow detail</span>
+        <button class="inspect-close" id="inspect-close" aria-label="Close">✕</button>
+      </div>
+      <pre class="inspect-body" id="inspect-body"></pre>
+    </div>
+  </div>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
+
