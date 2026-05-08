@@ -65,14 +65,14 @@ if (envFlag("APP_ACCESS_LOG", false)) {
 }
 
 async function stepOne(name: string): Promise<number> {
-  log("debug", `Hello ${name}`);
-  log("debug", "Step one completed");
+  log("info", `Hello ${name}`);
+  log("info", "Step one completed");
   return name.length;
 }
 
 async function stepTwo(name: string, nameLength: number): Promise<void> {
   log(
-    "debug",
+    "info",
     `Step two completed for ${name}; the name has ${nameLength} characters.`,
   );
 }
