@@ -72,6 +72,7 @@ public class App {
   private static void configureLogging() {
     String level = System.getenv().getOrDefault("APP_LOG_LEVEL", "info").toLowerCase();
     System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", level);
+    System.setProperty("org.slf4j.simpleLogger.log.dev.dbos.transact.conductor", "warn");
     System.setProperty("org.slf4j.simpleLogger.showDateTime", "false");
     System.setProperty("org.slf4j.simpleLogger.showThreadName", "false");
     System.setProperty("org.slf4j.simpleLogger.showLogName", "false");
