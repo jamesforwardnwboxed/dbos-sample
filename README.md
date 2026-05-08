@@ -1,10 +1,10 @@
 # DBOS Python Starter
 
-This branch contains the Python version of the sample app.
+This branch contains the Python version of the sample app plus a separate local control-plane runtime.
 
 ## What it does
 
-The app exposes `GET /` and runs a DBOS workflow with two steps:
+The DBOS app service exposes `GET /` and runs a DBOS workflow with two steps:
 
 - `step_one` prints a greeting and returns the length of the `name` query parameter
 - the workflow creates `existing.txt` and exits once to simulate a crash
@@ -45,6 +45,20 @@ That does not mean DBOS replaces Kafka for every case. Kafka is still a strong f
 - the model is a strong fit for AI agents, long-running jobs, payment flows, and human-in-the-loop processes where partial progress matters
 - because the workflow is regular code, the happy path is usually easier to read than equivalent state-machine or message-choreography implementations
 
+## Runtime split
+
+The repo now runs two Python services:
+
+- `app`: the DBOS workflow runtime on `http://localhost:8000`
+- `control-plane`: a separate FastAPI/WebSocket runtime on `http://localhost:8001`
+
+The control-plane service is a narrow Conductor-compatible shim. It accepts the SDK connection at `/websocket/{app_name}/{conductor_key}`, sends `executor_info` first, and currently supports only:
+
+- `list_workflows`
+- `recovery`
+
+The control-plane UI is served directly by that runtime at `http://localhost:8001/`. There is no Node/Vite frontend for v1.
+
 ## Run
 
 The whole sample is containerized. You only need Docker and Docker Compose on the host.
@@ -56,9 +70,11 @@ docker compose up --build
 This starts:
 
 - the app container
+- the control-plane container
 - a Postgres container for the DBOS system database
 
 The app is available at `http://localhost:8000`.
+The control-plane UI is available at `http://localhost:8001`.
 
 ## Try the recovery flow
 
@@ -67,6 +83,14 @@ The app is available at `http://localhost:8000`.
 3. The first request creates `existing.txt` and exits the app container intentionally.
 4. Docker Compose restarts the app container automatically.
 5. DBOS resumes the workflow from the point after `step_one`.
+
+## Control-plane verification
+
+1. Start the stack with `docker compose up --build`.
+2. Confirm the control-plane UI loads at `http://localhost:8001`.
+3. Confirm the DBOS app still responds at `http://localhost:8000/?name=world`.
+4. Inspect the control-plane dashboard to verify the executor session becomes ready after the `executor_info` handshake.
+5. Use the control-plane API endpoints to exercise `list_workflows` and `recovery` if needed.
 
 ## Stop the stack
 
