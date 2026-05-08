@@ -20,6 +20,6 @@ if __name__ == "__main__":
         app,
         host="0.0.0.0",
         port=8000,
-        log_level=os.environ.get("APP_LOG_LEVEL", "warning").lower(),
+        log_level=os.environ.get("APP_LOG_LEVEL", "info").lower(),
         access_log=_env_flag("APP_ACCESS_LOG", False),
     )

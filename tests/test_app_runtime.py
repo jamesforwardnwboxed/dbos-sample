@@ -59,12 +59,12 @@ def test_run_workflow_logic_completes_when_file_exists(
     assert events == [("James", 5)]
 
 
-def test_configure_logging_defaults_to_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_configure_logging_defaults_to_info(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("APP_LOG_LEVEL", raising=False)
 
     app_runtime.configure_logging()
 
-    assert logging.getLogger().getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger().getEffectiveLevel() == logging.INFO
 
 
 def test_configure_logging_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:

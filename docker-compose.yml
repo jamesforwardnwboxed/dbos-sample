@@ -26,7 +26,7 @@ services:
       DBOS_SYSTEM_DATABASE_URL: postgres://postgres:dbos@postgres:5432/dbos_starter
       DBOS_CONDUCTOR_URL: ws://control-plane:8001
       DBOS_CONDUCTOR_KEY: local-conductor-key
-      APP_LOG_LEVEL: warning
+      APP_LOG_LEVEL: info
       APP_ACCESS_LOG: "false"
     ports:
       - "8000:8000"

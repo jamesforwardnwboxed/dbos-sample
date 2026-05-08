@@ -22,7 +22,7 @@ def step_two(name: str, name_length: int) -> None:
 
 
 def configure_logging() -> None:
-    level_name = os.environ.get("APP_LOG_LEVEL", "warning").upper()
+    level_name = os.environ.get("APP_LOG_LEVEL", "info").upper()
     level = getattr(logging, level_name, logging.WARNING)
     logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s", force=True)
 
@@ -32,13 +32,16 @@ def get_existing_file_path() -> str:
 
 
 def run_workflow_logic(name: str = "world") -> None:
+    logger.info("Starting workflow for %s", name)
     name_length = step_one(name)
     existing_file = get_existing_file_path()
     if not os.path.exists(existing_file):
+        logger.warning("existing.txt missing; creating it and exiting to simulate a crash")
         with open(existing_file, "w"):
             pass
         os._exit(1)
     step_two(name, name_length)
+    logger.info("Completed workflow for %s", name)
 
 
 @app.get("/")
