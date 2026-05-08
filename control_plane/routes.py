@@ -169,3 +169,37 @@ async def restart_workflow(
         "status": record.status,
         "response": record.response_payload,
     }
+
+
+@router.post("/api/control-plane/fork")
+async def fork_workflow(
+    request: Request, payload: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    data = payload or {}
+    workflow_id = data.get("workflow_id")
+    if not workflow_id:
+        raise HTTPException(status_code=400, detail="workflow_id is required")
+    start_step = data.get("start_step")
+    if start_step is None:
+        raise HTTPException(status_code=400, detail="start_step is required")
+
+    try:
+        parsed_start_step = int(start_step)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="start_step must be an integer") from exc
+
+    try:
+        record = await request.app.state.conductor_manager.send_fork_workflow(
+            workflow_id,
+            parsed_start_step,
+            new_workflow_id=data.get("new_workflow_id") or None,
+            application_version=data.get("application_version") or None,
+            queue_name=data.get("queue_name") or None,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "request_id": record.request_id,
+        "status": record.status,
+        "response": record.response_payload,
+    }
