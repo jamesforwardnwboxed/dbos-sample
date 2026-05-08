@@ -31,9 +31,7 @@ services:
     restart: on-failure
 
   control-plane:
-    build:
-      context: .
-      dockerfile: Dockerfile.control-plane
+    image: dbos-control-plane:latest
     environment:
       CONTROL_PLANE_APP_NAME: dbos-starter
       CONTROL_PLANE_CONDUCTOR_KEY: local-conductor-key
