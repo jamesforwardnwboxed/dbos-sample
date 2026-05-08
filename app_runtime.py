@@ -11,14 +11,14 @@ logger = logging.getLogger("dbos_starter")
 
 @DBOS.step()
 def step_one(name: str) -> int:
-    logger.debug("Hello %s", name)
-    logger.debug("Step one completed")
+    logger.info("Hello %s", name)
+    logger.info("Step one completed")
     return len(name)
 
 
 @DBOS.step()
 def step_two(name: str, name_length: int) -> None:
-    logger.debug("Step two completed for %s; the name has %d characters.", name, name_length)
+    logger.info("Step two completed for %s; the name has %d characters.", name, name_length)
 
 
 def configure_logging() -> None:
