@@ -53,6 +53,14 @@ class ExampleImpl implements Example {
 public class App {
   public static void main(String[] args) {
     DBOSConfig dbosConfig = DBOSConfig.defaultsFromEnv("dbos-starter");
+    String conductorUrl = System.getenv("DBOS_CONDUCTOR_URL");
+    String conductorKey = System.getenv("DBOS_CONDUCTOR_KEY");
+    if (conductorUrl != null && !conductorUrl.isBlank()) {
+      dbosConfig = dbosConfig.withConductorDomain(conductorUrl);
+    }
+    if (conductorKey != null && !conductorKey.isBlank()) {
+      dbosConfig = dbosConfig.withConductorKey(conductorKey);
+    }
     DBOS dbos = new DBOS(dbosConfig);
     Example proxy = dbos.registerProxy(Example.class, new ExampleImpl(dbos));
 
