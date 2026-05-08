@@ -7,11 +7,17 @@ import io.javalin.Javalin;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+record WorkflowInput(String name, List<String> aliases, Map<String, Integer> weights) {}
+
+record StepOneResult(String greeting, int nameLength, Map<String, Integer> metrics) {}
+
 interface Example {
-  String workflow(String name);
+  String workflow(WorkflowInput input);
 }
 
 class ExampleImpl implements Example {
@@ -22,21 +28,30 @@ class ExampleImpl implements Example {
     this.dbos = dbos;
   }
 
-  private int stepOne(String name) {
-    logger.info("Hello {}", name);
+  private StepOneResult stepOne(WorkflowInput input) {
+    logger.info("Hello {}", input.name());
     logger.info("Step one completed");
-    return name.length();
+    return new StepOneResult(
+        "Hello " + input.name(),
+        input.name().length(),
+        Map.of(
+            "nameLength", input.name().length(),
+            "aliasCount", input.aliases().size(),
+            "weightCount", input.weights().size()));
   }
 
-  private void stepTwo(String name, int nameLength) {
-    logger.info("Step two completed for {}; the name has {} characters.", name, nameLength);
+  private void stepTwo(WorkflowInput input, StepOneResult result) {
+    logger.info(
+        "Step two completed for {}; the name has {} characters.",
+        input.name(),
+        result.nameLength());
   }
 
   @Override
   @Workflow
-  public String workflow(String name) {
-    logger.info("Starting workflow for {}", name);
-    int nameLength = dbos.runStep(() -> stepOne(name), "step_one");
+  public String workflow(WorkflowInput input) {
+    logger.info("Starting workflow for {}", input.name());
+    StepOneResult stepOneResult = dbos.runStep(() -> stepOne(input), "step_one");
 
     Path existingFile = Path.of("existing.txt");
     if (Files.notExists(existingFile)) {
@@ -49,8 +64,8 @@ class ExampleImpl implements Example {
       System.exit(1);
     }
 
-    dbos.runStep(() -> stepTwo(name, nameLength), "step_two");
-    logger.info("Completed workflow for {}", name);
+    dbos.runStep(() -> stepTwo(input, stepOneResult), "step_two");
+    logger.info("Completed workflow for {}", input.name());
     return "workflow executed";
   }
 }
@@ -107,7 +122,12 @@ public class App {
             if (name == null || name.isBlank()) {
               name = "world";
             }
-            ctx.result(proxy.workflow(name));
+            WorkflowInput input =
+                new WorkflowInput(
+                    name,
+                    List.of(name.toUpperCase(), new StringBuilder(name).reverse().toString()),
+                    Map.of("primary", name.length(), "secondary", Math.max(1, name.length() / 2)));
+            ctx.result(proxy.workflow(input));
           });
         })
         .start(8000);
