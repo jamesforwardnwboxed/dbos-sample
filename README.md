@@ -6,7 +6,8 @@ This branch contains the TypeScript version of the sample app.
 
 The app exposes `GET /` and runs a DBOS workflow with two steps:
 
-- `step_one` logs a greeting and returns the length of the `name` query parameter
+- the workflow input is a structured TypeScript object built from the `name` query parameter
+- `step_one` logs a greeting and returns a structured TypeScript object containing the greeting, name length, and extra metrics
 - the workflow creates `existing.txt` and exits once to simulate a crash
 - after restart, DBOS resumes the workflow and runs `step_two`
 

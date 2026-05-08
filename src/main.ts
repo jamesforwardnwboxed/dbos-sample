@@ -35,6 +35,18 @@ function envFlag(name: string, defaultValue: boolean): boolean {
   return ["1", "true", "yes", "on"].includes(raw.trim().toLowerCase());
 }
 
+type WorkflowInput = {
+  name: string;
+  aliases: string[];
+  weights: Record<string, number>;
+};
+
+type StepOneResult = {
+  greeting: string;
+  nameLength: number;
+  metrics: Record<string, number>;
+};
+
 const appLogLevel = getLogLevel();
 
 function log(level: LogLevel, message: string): void {
@@ -64,22 +76,41 @@ if (envFlag("APP_ACCESS_LOG", false)) {
   });
 }
 
-async function stepOne(name: string): Promise<number> {
-  log("info", `Hello ${name}`);
+async function stepOne(input: WorkflowInput): Promise<StepOneResult> {
+  log("info", `Hello ${input.name}`);
   log("info", "Step one completed");
-  return name.length;
+  return {
+    greeting: `Hello ${input.name}`,
+    nameLength: input.name.length,
+    metrics: {
+      nameLength: input.name.length,
+      aliasCount: input.aliases.length,
+      weightCount: Object.keys(input.weights).length,
+    },
+  };
 }
 
-async function stepTwo(name: string, nameLength: number): Promise<void> {
+async function stepTwo(input: WorkflowInput, result: StepOneResult): Promise<void> {
   log(
     "info",
-    `Step two completed for ${name}; the name has ${nameLength} characters.`,
+    `Step two completed for ${input.name}; the name has ${result.nameLength} characters.`,
   );
 }
 
-async function workflow(name = "world"): Promise<void> {
-  log("info", `Starting workflow for ${name}`);
-  const nameLength = await DBOS.runStep(() => stepOne(name), { name: "step_one" });
+function buildWorkflowInput(name = "world"): WorkflowInput {
+  return {
+    name,
+    aliases: [name.toUpperCase(), name.split("").reverse().join("")],
+    weights: {
+      primary: name.length,
+      secondary: Math.max(1, Math.floor(name.length / 2)),
+    },
+  };
+}
+
+async function workflow(input: WorkflowInput): Promise<void> {
+  log("info", `Starting workflow for ${input.name}`);
+  const stepOneResult = await DBOS.runStep(() => stepOne(input), { name: "step_one" });
 
   const existingFile = path.join(process.cwd(), "existing.txt");
   if (!existsSync(existingFile)) {
@@ -88,8 +119,8 @@ async function workflow(name = "world"): Promise<void> {
     process.exit(1);
   }
 
-  await DBOS.runStep(() => stepTwo(name, nameLength), { name: "step_two" });
-  log("info", `Completed workflow for ${name}`);
+  await DBOS.runStep(() => stepTwo(input, stepOneResult), { name: "step_two" });
+  log("info", `Completed workflow for ${input.name}`);
 }
 
 const dbosWorkflow = DBOS.registerWorkflow(workflow);
@@ -98,8 +129,9 @@ app.get("/", async (req, res, next) => {
   try {
     const queryName = req.query.name;
     const name = typeof queryName === "string" && queryName.length > 0 ? queryName : "world";
+    const input = buildWorkflowInput(name);
 
-    await dbosWorkflow(name);
+    await dbosWorkflow(input);
     res.status(200).send("workflow executed");
   } catch (error) {
     next(error);
