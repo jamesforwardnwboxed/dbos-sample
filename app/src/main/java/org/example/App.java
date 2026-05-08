@@ -4,9 +4,6 @@ import dev.dbos.transact.DBOS;
 import dev.dbos.transact.config.DBOSConfig;
 import dev.dbos.transact.workflow.Workflow;
 import io.javalin.Javalin;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -53,14 +50,8 @@ class ExampleImpl implements Example {
     logger.info("Starting workflow for {}", input.name());
     StepOneResult stepOneResult = dbos.runStep(() -> stepOne(input), "step_one");
 
-    Path existingFile = Path.of("existing.txt");
-    if (Files.notExists(existingFile)) {
-      logger.warn("existing.txt missing; creating it and exiting to simulate a crash");
-      try {
-        Files.createFile(existingFile);
-      } catch (IOException e) {
-        throw new RuntimeException(e);
-      }
+    if ("poison".equals(input.name())) {
+      logger.warn("poison input received; exiting to simulate a crash");
       System.exit(1);
     }
 
