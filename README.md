@@ -50,11 +50,11 @@ That does not mean DBOS replaces Kafka for every case. Kafka is still a strong f
 
 The whole sample is containerized. You only need Docker and Docker Compose on the host.
 
-The control-plane runs as a separate prebuilt image sourced from the [`dbos-control-plane`](https://github.com/jamesforwardnwboxed/dbos-control-plane) repo. Build it once locally before starting the stack:
+The control-plane runs as a separate prebuilt image sourced from the [`dbos-control-plane`](https://github.com/jamesforwardnwboxed/dbos-control-plane) repo. Build it once locally as `stepchange:latest` before starting the stack:
 
 ```bash
 git clone https://github.com/jamesforwardnwboxed/dbos-control-plane.git
-docker build -t dbos-control-plane:latest dbos-control-plane
+docker build -t stepchange:latest dbos-control-plane
 ```
 
 Then bring up the stack from this repo:
