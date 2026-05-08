@@ -52,12 +52,19 @@ The repo now runs two Python services:
 - `app`: the DBOS workflow runtime on `http://localhost:8000`
 - `control-plane`: a separate FastAPI/WebSocket runtime on `http://localhost:8001`
 
-The control-plane service is a narrow Conductor-compatible shim. It accepts the SDK connection at `/websocket/{app_name}/{conductor_key}`, sends `executor_info` first, and currently supports only:
+The control-plane service is a narrow Conductor-compatible shim. It accepts the SDK connection at `/websocket/{app_name}/{conductor_key}`, sends `executor_info` first, and currently supports:
 
 - `list_workflows`
+- `list_queued_workflows`
+- `get_workflow`
+- `list_steps`
 - `recovery`
+- `cancel`
+- `resume`
+- `restart`
+- `fork`
 
-The control-plane UI is served directly by that runtime at `http://localhost:8001/`. There is no Node/Vite frontend for v1.
+The control-plane UI is served directly by that runtime at `http://localhost:8001/`. There is no Node/Vite frontend for v1. The dashboard can inspect workflow state, trigger operator actions, and fork a workflow from a selected step into a new execution.
 
 ## Run
 
@@ -84,13 +91,24 @@ The control-plane UI is available at `http://localhost:8001`.
 4. Docker Compose restarts the app container automatically.
 5. DBOS resumes the workflow from the point after `step_one`.
 
+## Try the fork flow
+
+1. Start the stack with `docker compose up --build`.
+2. Open `http://localhost:8000/?name=world` once to create workflow history.
+3. Open `http://localhost:8001` and click `List Workflows`.
+4. Use the `fork` action on a workflow row.
+5. Select the step you want to re-execute from and optionally provide a new workflow ID.
+6. Submit the fork and confirm the new workflow appears in the workflow list with `ForkedFrom` pointing at the original execution.
+
 ## Control-plane verification
 
 1. Start the stack with `docker compose up --build`.
 2. Confirm the control-plane UI loads at `http://localhost:8001`.
 3. Confirm the DBOS app still responds at `http://localhost:8000/?name=world`.
 4. Inspect the control-plane dashboard to verify the executor session becomes ready after the `executor_info` handshake.
-5. Use the control-plane API endpoints to exercise `list_workflows` and `recovery` if needed.
+5. Use `List Workflows` to confirm workflow data loads into the dashboard.
+6. Open a workflow with `inspect`, load its steps through the fork modal, and verify the step list renders.
+7. Send a fork request and verify the returned workflow ID appears in later `list_workflows` results.
 
 ## Stop the stack
 
