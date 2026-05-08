@@ -1,6 +1,3 @@
-import { existsSync, writeFileSync } from "node:fs";
-import path from "node:path";
-
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import express from "express";
 
@@ -112,10 +109,8 @@ async function workflow(input: WorkflowInput): Promise<void> {
   log("info", `Starting workflow for ${input.name}`);
   const stepOneResult = await DBOS.runStep(() => stepOne(input), { name: "step_one" });
 
-  const existingFile = path.join(process.cwd(), "existing.txt");
-  if (!existsSync(existingFile)) {
-    log("warn", "existing.txt missing; creating it and exiting to simulate a crash");
-    writeFileSync(existingFile, "");
+  if (input.name === "poison") {
+    log("warn", "poison input received; exiting to simulate a crash");
     process.exit(1);
   }
 
