@@ -3,14 +3,51 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/gin-gonic/gin"
 )
+
+var logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+func envFlag(name string, defaultValue bool) bool {
+	raw, ok := os.LookupEnv(name)
+	if !ok {
+		return defaultValue
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func configureLogging() (string, bool) {
+	levelName := strings.ToLower(strings.TrimSpace(os.Getenv("APP_LOG_LEVEL")))
+	if levelName == "" {
+		levelName = "warning"
+	}
+
+	level := slog.LevelWarn
+	switch levelName {
+	case "debug":
+		level = slog.LevelDebug
+	case "info":
+		level = slog.LevelInfo
+	case "error":
+		level = slog.LevelError
+	}
+
+	logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+	return levelName, envFlag("APP_ACCESS_LOG", false)
+}
 
 func workflow(ctx dbos.DBOSContext, name string) (string, error) {
 	nameLengthAny, err := dbos.RunAsStep(ctx, func(stepCtx context.Context) (any, error) {
@@ -48,17 +85,17 @@ func workflow(ctx dbos.DBOSContext, name string) (string, error) {
 }
 
 func stepOne(ctx context.Context, name string) (int, error) {
-	fmt.Printf("Hello %s\n", name)
-	fmt.Println("Step one completed!")
+	logger.Debug("step one completed", "name", name)
 	return len(name), nil
 }
 
 func stepTwo(ctx context.Context, name string, nameLength int) (string, error) {
-	fmt.Printf("Step two completed for %s; the name has %d characters.\n", name, nameLength)
+	logger.Debug("step two completed", "name", name, "name_length", nameLength)
 	return "ok", nil
 }
 
 func main() {
+	_, accessLog := configureLogging()
 	appName := os.Getenv("DBOS_APP_NAME")
 	if appName == "" {
 		appName = "dbos-starter"
@@ -80,7 +117,12 @@ func main() {
 	}
 	defer dbos.Shutdown(dbosContext, 5*time.Second)
 
-	router := gin.Default()
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	if accessLog {
+		router.Use(gin.Logger())
+	}
 	router.GET("/", func(c *gin.Context) {
 		name := c.DefaultQuery("name", "world")
 
