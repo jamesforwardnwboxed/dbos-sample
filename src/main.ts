@@ -24,7 +24,7 @@ function getLogLevel(): LogLevel {
   if (raw === "warning") {
     return "warn";
   }
-  return "warn";
+  return "info";
 }
 
 function envFlag(name: string, defaultValue: boolean): boolean {
@@ -78,15 +78,18 @@ async function stepTwo(name: string, nameLength: number): Promise<void> {
 }
 
 async function workflow(name = "world"): Promise<void> {
+  log("info", `Starting workflow for ${name}`);
   const nameLength = await DBOS.runStep(() => stepOne(name), { name: "step_one" });
 
   const existingFile = path.join(process.cwd(), "existing.txt");
   if (!existsSync(existingFile)) {
+    log("warn", "existing.txt missing; creating it and exiting to simulate a crash");
     writeFileSync(existingFile, "");
     process.exit(1);
   }
 
   await DBOS.runStep(() => stepTwo(name, nameLength), { name: "step_two" });
+  log("info", `Completed workflow for ${name}`);
 }
 
 const dbosWorkflow = DBOS.registerWorkflow(workflow);
