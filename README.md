@@ -70,6 +70,14 @@ This starts:
 
 The app is available at `http://localhost:8000`.
 
+Both services are quiet by default. To enable routine request and step logs while debugging:
+
+```bash
+APP_LOG_LEVEL=info APP_ACCESS_LOG=true \
+CONTROL_PLANE_LOG_LEVEL=info CONTROL_PLANE_ACCESS_LOG=true \
+docker compose up --build
+```
+
 ## Try the recovery flow
 
 1. Start the stack with `docker compose up --build`.
