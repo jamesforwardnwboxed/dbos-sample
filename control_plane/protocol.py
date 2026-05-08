@@ -12,6 +12,8 @@ CancelRequest = dbos_protocol.CancelRequest
 CancelResponse = dbos_protocol.CancelResponse
 ExecutorInfoRequest = dbos_protocol.ExecutorInfoRequest
 ExecutorInfoResponse = dbos_protocol.ExecutorInfoResponse
+ForkWorkflowRequest = dbos_protocol.ForkWorkflowRequest
+ForkWorkflowResponse = dbos_protocol.ForkWorkflowResponse
 GetWorkflowRequest = dbos_protocol.GetWorkflowRequest
 GetWorkflowResponse = dbos_protocol.GetWorkflowResponse
 ListQueuedWorkflowsRequest = dbos_protocol.ListQueuedWorkflowsRequest
@@ -72,6 +74,10 @@ def parse_resume_response(message: str) -> ResumeResponse:
 
 def parse_restart_response(message: str) -> RestartResponse:
     return RestartResponse.from_json(message)
+
+
+def parse_fork_workflow_response(message: str) -> ForkWorkflowResponse:
+    return ForkWorkflowResponse.from_json(message)
 
 
 def build_executor_info_request(request_id: str) -> ExecutorInfoRequest:
@@ -172,6 +178,30 @@ def build_restart_request(request_id: str, workflow_id: str) -> RestartRequest:
         type=MessageType.RESTART,
         request_id=request_id,
         workflow_id=workflow_id,
+    )
+
+
+def build_fork_workflow_request(
+    request_id: str,
+    workflow_id: str,
+    start_step: int,
+    *,
+    new_workflow_id: str | None = None,
+    application_version: str | None = None,
+    queue_name: str | None = None,
+) -> ForkWorkflowRequest:
+    body: dict[str, Any] = {
+        "workflow_id": workflow_id,
+        "start_step": start_step,
+        "new_workflow_id": new_workflow_id,
+        "application_version": application_version,
+    }
+    if queue_name is not None:
+        body["queue_name"] = queue_name
+    return ForkWorkflowRequest(
+        type=MessageType.FORK_WORKFLOW,
+        request_id=request_id,
+        body=cast(dbos_protocol.ForkWorkflowBody, body),
     )
 
 

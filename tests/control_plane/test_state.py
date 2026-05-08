@@ -266,3 +266,76 @@ async def test_control_actions_complete_requests() -> None:
     assert cancel_record.status == "succeeded"
     assert resume_record.status == "succeeded"
     assert restart_record.status == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_fork_workflow_round_trip_completes_request() -> None:
+    manager, websocket = await make_ready_manager()
+
+    fork_task = asyncio.create_task(
+        manager.send_fork_workflow(
+            "wf-1",
+            2,
+            new_workflow_id="wf-2",
+            application_version="v2",
+            queue_name="critical",
+        )
+    )
+    await asyncio.sleep(0)
+
+    request = protocol.ForkWorkflowRequest.from_json(websocket.messages[-1])
+    assert request.body["workflow_id"] == "wf-1"
+    assert request.body["start_step"] == 2
+    assert request.body["new_workflow_id"] == "wf-2"
+    assert request.body["application_version"] == "v2"
+    assert request.body["queue_name"] == "critical"
+
+    await manager.complete_request_from_message(
+        protocol.ForkWorkflowResponse(
+            type=MessageType.FORK_WORKFLOW,
+            request_id=request.request_id,
+            new_workflow_id="wf-2",
+        ).to_json()
+    )
+    fork_record = await fork_task
+
+    assert fork_record.status == "succeeded"
+    assert fork_record.response_payload == {
+        "type": "fork_workflow",
+        "request_id": request.request_id,
+        "new_workflow_id": "wf-2",
+        "error_message": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_fork_workflow_request_includes_optional_keys_when_omitted() -> None:
+    manager, websocket = await make_ready_manager()
+
+    fork_task = asyncio.create_task(manager.send_fork_workflow("wf-1", 1))
+    await asyncio.sleep(0)
+
+    request = protocol.ForkWorkflowRequest.from_json(websocket.messages[-1])
+    assert request.body == {
+        "workflow_id": "wf-1",
+        "start_step": 1,
+        "new_workflow_id": None,
+        "application_version": None,
+    }
+
+    await manager.complete_request_from_message(
+        protocol.ForkWorkflowResponse(
+            type=MessageType.FORK_WORKFLOW,
+            request_id=request.request_id,
+            new_workflow_id="generated-fork-id",
+        ).to_json()
+    )
+    fork_record = await fork_task
+
+    assert fork_record.status == "succeeded"
+    assert fork_record.response_payload == {
+        "type": "fork_workflow",
+        "request_id": request.request_id,
+        "new_workflow_id": "generated-fork-id",
+        "error_message": None,
+    }

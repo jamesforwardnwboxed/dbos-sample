@@ -168,6 +168,25 @@ class ConductorManager:
         request = protocol.build_restart_request(protocol.new_request_id(), workflow_id)
         return await self._send_request(request.type.value, protocol.message_to_dict(request), request.to_json())
 
+    async def send_fork_workflow(
+        self,
+        workflow_id: str,
+        start_step: int,
+        *,
+        new_workflow_id: str | None = None,
+        application_version: str | None = None,
+        queue_name: str | None = None,
+    ) -> ConductorRequestRecord:
+        request = protocol.build_fork_workflow_request(
+            protocol.new_request_id(),
+            workflow_id,
+            start_step,
+            new_workflow_id=new_workflow_id,
+            application_version=application_version,
+            queue_name=queue_name,
+        )
+        return await self._send_request(request.type.value, protocol.message_to_dict(request), request.to_json())
+
     async def _send_request(self, message_type: str, request_payload: dict[str, Any], payload_json: str) -> ConductorRequestRecord:
         async with self._lock:
             if self._session is None or self._session.websocket is None or self._session.status != "ready":
@@ -273,6 +292,13 @@ class ConductorManager:
 
         if base_message.type == protocol.MessageType.RESTART:
             response = protocol.parse_restart_response(message)
+            response_payload = protocol.message_to_dict(response)
+            async with self._lock:
+                self._complete_request_locked(base_message.request_id, response_payload)
+            return
+
+        if base_message.type == protocol.MessageType.FORK_WORKFLOW:
+            response = protocol.parse_fork_workflow_response(message)
             response_payload = protocol.message_to_dict(response)
             async with self._lock:
                 self._complete_request_locked(base_message.request_id, response_payload)
