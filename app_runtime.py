@@ -1,5 +1,6 @@
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any
 
 from dbos import DBOS, DBOSConfig
@@ -9,16 +10,42 @@ app = FastAPI()
 logger = logging.getLogger("dbos_starter")
 
 
+@dataclass
+class WorkflowInput:
+    name: str
+    aliases: list[str]
+    weights: dict[str, int]
+
+
+@dataclass
+class StepOneResult:
+    greeting: str
+    name_length: int
+    metrics: dict[str, int]
+
+
 @DBOS.step()
-def step_one(name: str) -> int:
-    logger.info("Hello %s", name)
+def step_one(input_data: WorkflowInput) -> StepOneResult:
+    logger.info("Hello %s", input_data.name)
     logger.info("Step one completed")
-    return len(name)
+    return StepOneResult(
+        greeting=f"Hello {input_data.name}",
+        name_length=len(input_data.name),
+        metrics={
+            "name_length": len(input_data.name),
+            "alias_count": len(input_data.aliases),
+            "weight_count": len(input_data.weights),
+        },
+    )
 
 
 @DBOS.step()
-def step_two(name: str, name_length: int) -> None:
-    logger.info("Step two completed for %s; the name has %d characters.", name, name_length)
+def step_two(input_data: WorkflowInput, step_one_result: StepOneResult) -> None:
+    logger.info(
+        "Step two completed for %s; the name has %d characters.",
+        input_data.name,
+        step_one_result.name_length,
+    )
 
 
 def configure_logging() -> None:
@@ -31,17 +58,26 @@ def get_existing_file_path() -> str:
     return os.path.join(os.path.dirname(__file__), "existing.txt")
 
 
+def build_workflow_input(name: str = "world") -> WorkflowInput:
+    return WorkflowInput(
+        name=name,
+        aliases=[name.upper(), name[::-1]],
+        weights={"primary": len(name), "secondary": max(1, len(name) // 2)},
+    )
+
+
 def run_workflow_logic(name: str = "world") -> None:
-    logger.info("Starting workflow for %s", name)
-    name_length = step_one(name)
+    workflow_input = build_workflow_input(name)
+    logger.info("Starting workflow for %s", workflow_input.name)
+    step_one_result = step_one(workflow_input)
     existing_file = get_existing_file_path()
     if not os.path.exists(existing_file):
         logger.warning("existing.txt missing; creating it and exiting to simulate a crash")
         with open(existing_file, "w"):
             pass
         os._exit(1)
-    step_two(name, name_length)
-    logger.info("Completed workflow for %s", name)
+    step_two(workflow_input, step_one_result)
+    logger.info("Completed workflow for %s", workflow_input.name)
 
 
 @app.get("/")

@@ -6,7 +6,8 @@ This branch contains the Python version of the sample app plus a separate local 
 
 The DBOS app service exposes `GET /` and runs a DBOS workflow with two steps:
 
-- `step_one` prints a greeting and returns the length of the `name` query parameter
+- the workflow input is a structured Python object built from the `name` query parameter
+- `step_one` prints a greeting and returns a structured Python object containing the greeting, name length, and extra metrics
 - the workflow creates `existing.txt` and exits once to simulate a crash
 - after restart, DBOS resumes the workflow and runs `step_two`
 

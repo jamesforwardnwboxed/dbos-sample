@@ -26,8 +26,20 @@ def test_run_workflow_logic_exits_once_when_file_missing(
 ) -> None:
     events: list[tuple[str, object]] = []
 
-    monkeypatch.setattr(app_runtime, "step_one", lambda name: len(name))
-    monkeypatch.setattr(app_runtime, "step_two", lambda name, name_length: events.append((name, name_length)))
+    monkeypatch.setattr(
+        app_runtime,
+        "step_one",
+        lambda input_data: app_runtime.StepOneResult(
+            greeting=f"Hello {input_data.name}",
+            name_length=len(input_data.name),
+            metrics={"name_length": len(input_data.name)},
+        ),
+    )
+    monkeypatch.setattr(
+        app_runtime,
+        "step_two",
+        lambda input_data, step_one_result: events.append((input_data.name, step_one_result.name_length)),
+    )
     monkeypatch.setattr(app_runtime, "get_existing_file_path", lambda: str(tmp_path / "existing.txt"))
 
     def fake_exit(code: int) -> None:
@@ -50,13 +62,33 @@ def test_run_workflow_logic_completes_when_file_exists(
     existing_file = tmp_path / "existing.txt"
     existing_file.touch()
 
-    monkeypatch.setattr(app_runtime, "step_one", lambda name: len(name))
-    monkeypatch.setattr(app_runtime, "step_two", lambda name, name_length: events.append((name, name_length)))
+    monkeypatch.setattr(
+        app_runtime,
+        "step_one",
+        lambda input_data: app_runtime.StepOneResult(
+            greeting=f"Hello {input_data.name}",
+            name_length=len(input_data.name),
+            metrics={"name_length": len(input_data.name)},
+        ),
+    )
+    monkeypatch.setattr(
+        app_runtime,
+        "step_two",
+        lambda input_data, step_one_result: events.append((input_data.name, step_one_result.name_length)),
+    )
     monkeypatch.setattr(app_runtime, "get_existing_file_path", lambda: str(existing_file))
 
     app_runtime.run_workflow_logic("James")
 
     assert events == [("James", 5)]
+
+
+def test_build_workflow_input_returns_structured_payload() -> None:
+    workflow_input = app_runtime.build_workflow_input("Ada")
+
+    assert workflow_input.name == "Ada"
+    assert workflow_input.aliases == ["ADA", "adA"]
+    assert workflow_input.weights == {"primary": 3, "secondary": 1}
 
 
 def test_configure_logging_defaults_to_info(monkeypatch: pytest.MonkeyPatch) -> None:
