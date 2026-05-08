@@ -66,6 +66,12 @@ The control-plane service is a narrow Conductor-compatible shim. It accepts the 
 
 The control-plane UI is served directly by that runtime at `http://localhost:8001/`. There is no Node/Vite frontend for v1. The dashboard can inspect workflow state, trigger operator actions, and fork a workflow from a selected step into a new execution.
 
+Important operator boundary:
+
+- native `recovery` still means DBOS resumes pending workflows with their original persisted input
+- native `fork` still means DBOS reuses persisted input and completed step outputs before the selected step
+- editable input override is implemented in the shim as a custom rerun launch from the fork modal, and currently only supports a full rerun from `step 0`
+
 ## Run
 
 The whole sample is containerized. You only need Docker and Docker Compose on the host.
@@ -100,6 +106,16 @@ The control-plane UI is available at `http://localhost:8001`.
 5. Select the step you want to re-execute from and optionally provide a new workflow ID.
 6. Submit the fork and confirm the new workflow appears in the workflow list with `ForkedFrom` pointing at the original execution.
 
+## Try editable input override rerun
+
+1. Start the stack with `docker compose up --build`.
+2. Open `http://localhost:8000/?name=world` once to create workflow history.
+3. Open `http://localhost:8001` and click `List Workflows`.
+4. Use the `fork` action on a workflow row.
+5. Leave the selection on `step 0` and edit the `Input override` JSON to something like `{ "name": "Ada" }`.
+6. Submit the rerun and confirm the new workflow appears in the workflow list.
+7. Inspect the rerun request in the control-plane request log and confirm the app output reflects the overridden input.
+
 ## Control-plane verification
 
 1. Start the stack with `docker compose up --build`.
@@ -109,6 +125,8 @@ The control-plane UI is available at `http://localhost:8001`.
 5. Use `List Workflows` to confirm workflow data loads into the dashboard.
 6. Open a workflow with `inspect`, load its steps through the fork modal, and verify the step list renders.
 7. Send a fork request and verify the returned workflow ID appears in later `list_workflows` results.
+8. Send an edited-input rerun from `step 0` and verify the returned workflow ID appears in later `list_workflows` results.
+9. Trigger native recovery and verify it still resumes pending workflows without any input-edit UI.
 
 ## Stop the stack
 
