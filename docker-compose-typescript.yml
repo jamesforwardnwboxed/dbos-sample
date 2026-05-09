@@ -13,11 +13,11 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data_typescript:/var/lib/postgresql/data
 
   app:
     build:
-      context: .
+      context: typescript
     depends_on:
       postgres:
         condition: service_healthy
@@ -33,6 +33,8 @@ services:
     restart: on-failure
 
   control-plane:
+    build:
+      context: .
     image: stepchange:latest
     depends_on:
       postgres:
@@ -49,4 +51,4 @@ services:
     restart: on-failure
 
 volumes:
-  postgres_data:
+  postgres_data_typescript:
