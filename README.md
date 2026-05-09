@@ -1,224 +1,124 @@
-# StepChange
+# StepChange Sample Apps
 
-StepChange is the standalone control plane / conductor service used by the [`dbos-starter`](https://github.com/eeveebank/dbos-starter) sample apps (Python, Go, Java, TypeScript). It exposes a FastAPI service on port `8001`, talks directly to the DBOS system database, serves a browser UI, and maintains the WebSocket session that DBOS executors use for operator commands.
+This repository contains sample applications for DBOS in multiple languages (Go, TypeScript, Python, and Java), alongside the `StepChange` control plane service used by them.
 
 ## What It Does
 
-This project splits the DBOS control-plane concerns out of the sample application repo so every language branch can point at the same StepChange image instead of carrying its own copy of the Python shim.
+Each language directory (`go`, `typescript`, `python`, `java`) contains a complete, containerized sample application that uses the DBOS SDK to run durable workflows. These applications are designed to demonstrate:
 
-At runtime it provides:
+- Durable workflow execution with automatic checkpointing and recovery.
+- Integration with the `StepChange` control plane for operator actions (recovery, cancel, resume, restart, fork) and monitoring via a browser dashboard.
+- Cross-language interoperability through shared serialization formats.
 
-- a browser dashboard for inspecting workflow state and recent conductor traffic
-- a conductor-compatible WebSocket endpoint for DBOS executors
-- HTTP endpoints that translate UI actions into conductor messages
-- direct system-database reads and writes for advanced fork workflows
-- cross-language input/output decoding so forks work across Python, Go, TypeScript, and Java starters
+## StepChange Features
 
-The service is intentionally narrow: it is not a general DBOS replacement or a standalone workflow engine. The executor still runs inside the app container. This repo provides the operator surface around that executor.
+The `StepChange` service acts as a conductor bridge between DBOS executors and an operator UI/API. It provides:
 
-## Feature Set
-
-### Dashboard and request log
-
+### Dashboard and Request Log
 The UI at `GET /` is a static single-page app served directly by FastAPI. It shows:
+- Current executor connection state and metadata.
+- Recent control-plane events and request/response history.
+- Workflow lists, queued workflows, details, and step details.
 
-- current executor connection state
-- executor metadata from the initial `executor_info` handshake
-- recent control-plane events and request/response history
-- workflow lists, queued workflow lists, workflow details, and step details
-
-This is useful both for operator actions and for debugging the conductor protocol itself.
-
-### Conductor protocol bridge
-
-The WebSocket endpoint lives at:
-
-- `WS /websocket/{app_name}/{conductor_key}`
-
-Behavior:
-
-- validates the expected app name and shared conductor key before accepting the session
-- initiates the DBOS handshake by sending `executor_info`
-- tracks session lifecycle, request timeouts, and disconnects
-- forwards operator requests to the connected executor and records responses
-
-Supported conductor operations include:
-
+### Conductor Protocol Bridge
+The WebSocket endpoint lives at `WS /websocket/{app_name}/{conductor_key}` and supports:
 - `list_workflows`
 - `list_queued_workflows`
 - `get_workflow`
 - `list_steps`
-- `recovery`
-- `cancel`
-- `resume`
-- `restart`
+- `recovery`, `cancel`, `resume`, `restart`
 - `fork`
 
-### Edited fork workflows
+### Edited Fork Workflows
+Beyond native forks, this repo adds an edited-fork path that can stage or run a rewritten fork directly against the DBOS system database. You can:
+- Seed editable workflow input from the source workflow's persisted input.
+- Override workflow inputs before re-execution.
+- Override preserved step outputs before the restart point.
 
-Beyond the native conductor fork command, this repo adds an edited-fork path that can stage or run a rewritten fork directly against the DBOS system database.
-
-Supported behaviors:
-
-- seed editable workflow input from the source workflow's persisted input
-- override workflow inputs before re-execution
-- override preserved step outputs before the restart point
-- optionally cancel the original workflow first if it is still active
-- stage a new workflow for recovery-driven execution
-- immediately trigger that staged workflow via `recovery`
-
-There are two modes:
-
-- `stage`: create the new staged workflow and stop there
-- `run`: stage the new workflow, clear conflicting orphan staged forks for the same executor, and then trigger recovery automatically
-
-Current limitations:
-
-- edited fork does not support child workflows yet
-- step output overrides only apply to preserved steps before `start_step`
-- execution of staged forks is tied to a ready executor session and its `application_version`
-
-### Cross-language serialization support
-
-The control plane has custom serialization handling so it can read and rewrite workflow inputs and step outputs created by different DBOS SDKs.
-
-It understands:
-
-- Python serializer shapes
-- portable JSON workflow input shape (`positionalArgs` / `namedArgs`)
-- Go/TypeScript `DBOS_JSON`
-- TypeScript `js_superjson`
-- Java `java_jackson`
-
-This matters because the Python DBOS SDK does not natively register all of the codecs used by the other language SDKs. Without these compatibility layers, cross-language fork inspection and edited reruns would fail or write unreadable payloads.
-
-### Schema compatibility across SDKs
-
-The DBOS SDKs do not all ship identical `dbos.workflow_status` schemas. In particular, Go and TypeScript can omit columns such as `was_forked_from` and `rate_limited`.
-
-This repo adapts to the actual database schema at runtime so the same control-plane image can safely target databases owned by different language executors.
+### Cross-language Serialization Support
+The control plane understands various serialization shapes (Python, Go/TypeScript `DBOS_JSON`, TypeScript `js_superjson`, Java `java_jackson`) to allow cross-language fork inspection and reruns.
 
 ## Architecture
 
-High-level flow:
+The project is split into two main components:
 
-1. The app container starts and connects to `ws://control-plane:8001/websocket/{app_name}/{conductor_key}`.
-2. This service validates the connection and requests `executor_info`.
-3. The UI or HTTP API triggers an operator action.
-4. The control plane either:
-   - sends a conductor request over WebSocket to the executor, or
-   - performs local database work for edited-fork staging, then optionally sends `recovery`.
-5. The service records events and responses so the UI can show current state.
+1. **Sample Applications**: Language-specific implementations of a simple workflow that simulates a crash when a specific input is provided (`name=poison`). This allows you to test the recovery and operator features.
+2. **StepChange Control Plane**: A standalone service (provided as a Docker image/build context) that acts as a conductor bridge between the DBOS executors and an operator UI/API.
 
-This split keeps the executor inside the app runtime while making the operator UX and conductor bridge reusable across all starter languages.
+## Running the Samples
 
-## Build
+All samples are containerized with Docker Compose. You should first build the `stepchange` control plane image locally before running any of the language-specific stacks.
+
+### 1. Build StepChange Control Plane
+
+```bash
+git clone https://github.com/eeveebank/stepchange.git
+docker build -t stepchange:latest stepchange
+```
+*(Note: If you are working within this repo, the build context is `.`)*
 
 ```bash
 docker build -t stepchange:latest .
 ```
 
-The `dbos-starter` per-language `docker-compose.yml` files reference this image by name (`stepchange:latest`) and expect it to exist locally — there is no registry push.
+### 2. Run a specific language stack
 
-## Run
-
-Usually invoked via `docker compose` from a `dbos-starter` checkout. To run standalone:
+Navigate to the desired directory and use `docker compose up`. For example, to run the Go sample:
 
 ```bash
-docker run --rm -p 8001:8001 \
-  -e CONTROL_PLANE_SYSTEM_DATABASE_URL=postgres://postgres:dbos@host.docker.internal:5432/dbos_starter \
-  stepchange:latest
+cd go
+docker compose up --build
 ```
 
-The corresponding app container should be configured with:
+The services will be available at:
+- **App**: `http://localhost:8000`
+- **StepChange Dashboard**: `http://localhost:8001`
+
+### Enabling Debug Logs
+
+To enable more detailed logs for both the app and the control plane during debugging:
 
 ```bash
-DBOS_CONDUCTOR_URL=ws://control-plane:8001/websocket
-DBOS_CONDUCTOR_KEY=local-conductor-key
-DBOS_APP_NAME=dbos-starter
+# Example for Go
+APP_LOG_LEVEL=info APP_ACCESS_LOG=true \
+CONTROL_PLANE_LOG_LEVEL=info CONTROL_PLANE_ACCESS_LOG=true \
+docker compose up --build
 ```
 
-## Configuration
+## Testing Recovery and Forking
 
-| Env var | Default | Purpose |
-| --- | --- | --- |
-| `CONTROL_PLANE_APP_NAME` | `dbos-starter` | App name reported to conductor clients |
-| `CONTROL_PLANE_CONDUCTOR_KEY` | `local-conductor-key` | Shared key clients use as `DBOS_CONDUCTOR_KEY` |
-| `CONTROL_PLANE_SYSTEM_DATABASE_URL` / `DBOS_SYSTEM_DATABASE_URL` | `postgres://postgres:dbos@postgres:5432/dbos_starter` | DBOS system DB connection |
-| `CONTROL_PLANE_HOST` | `0.0.0.0` | Bind host |
-| `CONTROL_PLANE_PORT` | `8001` | Bind port |
-| `CONTROL_PLANE_REQUEST_TIMEOUT_SECONDS` | `5.0` | Per-request timeout |
-| `CONTROL_PLANE_LOG_LEVEL` | `info` | Uvicorn log level |
-| `CONTROL_PLANE_ACCESS_LOG` | `false` | Enable HTTP access logging |
+### Try the recovery flow
 
-The control plane leaves startup and lifecycle logging on by default and keeps request logging off. To turn request logging back on while debugging:
+1. Start the stack: `docker compose up --build`
+2. Open `http://localhost:8000/?name=world` to create a successful workflow.
+3. Open `http://localhost:8000/?name=poison` to make the app container crash intentionally.
+4. Docker Compose will restart the app container automatically.
+5. Open `http://localhost:8001` and use the dashboard to inspect the stalled/failed workflow and trigger a **recovery**.
+
+### Try the fork flow
+
+1. Start the stack: `docker compose up --build`
+2. Open `http://localhost:8000/?name=world` once to create a workflow history.
+3. Open `http://localhost:8001` and click **List Workflows**.
+4. Use the `fork` action on a workflow row.
+5. Select the step you want to re-execute from and optionally provide a new workflow ID.
+6. Submit the fork and confirm the new workflow appears in the list.
+
+## Supported Languages
+
+- [Go](./go/README.md)
+- [TypeScript](./typescript/README.md)
+- [Python](./python/README.md)
+- [Java](./java/README.md)
+
+## Stopping the Stack
 
 ```bash
-CONTROL_PLANE_LOG_LEVEL=info
-CONTROL_PLANE_ACCESS_LOG=true
+docker compose down
 ```
 
-## API Surface
-
-### UI and state
-
-- `GET /` : static dashboard UI
-- `GET /api/control-plane/state` : current snapshot of session state, cached outputs, request history, and events
-
-### Executor-backed workflow operations
-
-- `POST /api/control-plane/list-workflows`
-- `POST /api/control-plane/list-queued-workflows`
-- `POST /api/control-plane/get-workflow`
-- `POST /api/control-plane/list-steps`
-- `POST /api/control-plane/recovery`
-- `POST /api/control-plane/cancel`
-- `POST /api/control-plane/resume`
-- `POST /api/control-plane/restart`
-- `POST /api/control-plane/fork`
-
-Native `fork` requests can pass through DBOS options such as:
-
-- `new_workflow_id`
-- `application_version`
-- `queue_name`
-
-### Edited fork operations
-
-`POST /api/control-plane/fork` also supports local edited-fork execution when either of these fields is present:
-
-- `workflow_input_override`
-- `step_output_overrides`
-
-Additional edited-fork fields:
-
-- `mode`: `stage` or `run`
-- `new_workflow_id`
-- `cancel_original_if_active`
-
-There is also a dedicated follow-up endpoint:
-
-- `POST /api/control-plane/execute-staged-fork`
-
-Use that when a workflow was staged earlier and you want the control plane to validate it and trigger execution via recovery.
-
-## Tests
+To also remove the database volumes:
 
 ```bash
-pip install -r requirements.txt -r requirements-dev.txt
-pytest
+docker compose down -v
 ```
-
-The test suite covers:
-
-- handshake and websocket lifecycle
-- state snapshot behavior
-- UI and API routes
-- fork and edited-fork flows
-- cross-language serialization handling in fork state
-
-## Endpoints
-
-- `GET /` — UI
-- `GET /api/...` — JSON API for state, workflow inspection, recovery, lifecycle actions, and fork actions
-- `WS /websocket/{app_name}/{conductor_key}` — DBOS conductor protocol endpoint
