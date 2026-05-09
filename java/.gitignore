@@ -1,4 +1,2 @@
-__pycache__/
-existing.txt
+.idea/
 .gradle/
-app/build/
