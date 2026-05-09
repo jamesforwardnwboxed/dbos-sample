@@ -17,12 +17,6 @@ class MyWorkflowImpl implements MyWorkflow {
     public String runWorkflow(WorkflowInput input) {
         logger.info("Starting workflow for {}", input.name());
         StepOneResult stepOneResult = mySteps.stepOne(input);
-
-        if ("poison".equals(input.name())) {
-            logger.warn("poison input received; exiting to simulate a crash");
-            System.exit(1);
-        }
-
         mySteps.stepTwo(input, stepOneResult);
         logger.info("Completed workflow for {}", input.name());
         return "workflow executed";
