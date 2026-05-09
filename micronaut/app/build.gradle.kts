@@ -6,10 +6,6 @@ micronaut {
     version("4.10.7")
     runtime("netty")
     testRuntime("junit5")
-    processing {
-        incremental(true)
-        annotations.add("org.example.*")
-    }
 }
 
 dependencies {

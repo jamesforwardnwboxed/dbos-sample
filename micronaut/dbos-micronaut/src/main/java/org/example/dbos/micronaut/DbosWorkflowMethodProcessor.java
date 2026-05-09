@@ -3,6 +3,7 @@ package org.example.dbos.micronaut;
 import dev.dbos.transact.DBOS;
 import dev.dbos.transact.workflow.Workflow;
 import io.micronaut.context.BeanContext;
+import io.micronaut.context.Qualifier;
 import io.micronaut.context.processor.ExecutableMethodProcessor;
 import io.micronaut.inject.BeanDefinition;
 import io.micronaut.inject.ExecutableMethod;
@@ -23,8 +24,8 @@ public class DbosWorkflowMethodProcessor implements ExecutableMethodProcessor<Db
 
     @Override
     public void process(BeanDefinition<?> beanDefinition, ExecutableMethod<?, ?> method) {
-        Object bean = beanContext.getBean(beanDefinition.getBeanType());
-        bean = DbosTargetResolver.unwrapTarget(bean);
+        Class<?> declaringType = method.getDeclaringType();
+        Object bean = resolveTargetBean(declaringType, beanDefinition);
 
         Method targetMethod = DbosTargetResolver.findTargetMethod(bean.getClass(), method);
         Workflow workflow = targetMethod.getAnnotation(Workflow.class);
@@ -32,6 +33,12 @@ public class DbosWorkflowMethodProcessor implements ExecutableMethodProcessor<Db
             return;
         }
 
-        dbos.integration().registerWorkflow(workflow, bean, targetMethod, "");
+        dbos.integration().registerWorkflow(workflow, bean, targetMethod, null);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private Object resolveTargetBean(Class<?> declaringType, BeanDefinition<?> beanDefinition) {
+        Qualifier qualifier = beanDefinition.getDeclaredQualifier();
+        return beanContext.getProxyTargetBean((Class) declaringType, qualifier);
     }
 }
