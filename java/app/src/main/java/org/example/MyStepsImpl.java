@@ -10,7 +10,7 @@ class MyStepsImpl implements MySteps {
 
     private static final Logger logger = LoggerFactory.getLogger(MyStepsImpl.class);
 
-    @Step
+    @Step(name = "step_one")
     public StepOneResult stepOne(WorkflowInput input) {
         logger.info("Hello {}", input.name());
         logger.info("Step one completed");
@@ -23,7 +23,7 @@ class MyStepsImpl implements MySteps {
                         "weightCount", input.weights().size()));
     }
 
-    @Step
+    @Step(name = "step_two")
     public void stepTwo(WorkflowInput input, StepOneResult result) {
         logger.info(
                 "Step two completed for {}; the name has {} characters.",
