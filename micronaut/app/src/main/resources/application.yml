@@ -1,0 +1,24 @@
+micronaut:
+  application:
+    name: dbos-starter
+  server:
+    port: ${SERVER_PORT:8000}
+    netty:
+      access-logger:
+        enabled: ${APP_ACCESS_LOG:false}
+
+logger:
+  levels:
+    root: ${APP_LOG_LEVEL:INFO}
+    dev.dbos.transact.conductor: WARN
+
+dbos:
+  application:
+    name: ${DBOS_APPLICATION_NAME:${micronaut.application.name}}
+  datasource:
+    url: ${DBOS_DATASOURCE_URL:jdbc:postgresql://localhost:5432/dbos_starter}
+    username: ${DBOS_DATASOURCE_USERNAME:postgres}
+    password: ${DBOS_DATASOURCE_PASSWORD:dbos}
+  conductor:
+    domain: ${DBOS_CONDUCTOR_DOMAIN:}
+    key: ${DBOS_CONDUCTOR_KEY:}

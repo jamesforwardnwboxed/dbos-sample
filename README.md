@@ -1,10 +1,10 @@
 # StepChange Sample Apps
 
-This repository contains sample applications for DBOS in multiple languages and frameworks (Go, TypeScript, Python, Javalin, and Spring Boot), alongside the `StepChange` control plane service used by them.
+This repository contains sample applications for DBOS in multiple languages and frameworks (Go, TypeScript, Python, Javalin, Spring Boot, and Micronaut), alongside the `StepChange` control plane service used by them.
 
 ## What It Does
 
-Each sample directory (`go`, `typescript`, `python`, `javalin`, `spring-boot`) contains a complete, containerized application that uses the DBOS SDK to run durable workflows. These applications are designed to demonstrate:
+Each sample directory (`go`, `typescript`, `python`, `javalin`, `spring-boot`, `micronaut`) contains a complete, containerized application that uses the DBOS SDK to run durable workflows. These applications are designed to demonstrate:
 
 - Durable workflow execution with automatic checkpointing and recovery.
 - Integration with the `StepChange` control plane for operator actions (recovery, cancel, resume, restart, fork) and monitoring via a browser dashboard.
@@ -110,6 +110,7 @@ docker compose up --build
 - [Python](./python/README.md)
 - [Javalin](./javalin/README.md)
 - [Spring Boot](./spring-boot/README.md)
+- [Micronaut](./micronaut/README.md)
 
 ## Stopping the Stack
 
