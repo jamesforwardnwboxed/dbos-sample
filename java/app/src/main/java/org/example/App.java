@@ -3,10 +3,15 @@ package org.example;
 import dev.dbos.transact.DBOS;
 import dev.dbos.transact.config.DBOSConfig;
 import io.javalin.Javalin;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.List;
 import java.util.Map;
 
 public class App {
+
+  private static final Logger logger = LoggerFactory.getLogger(MyStepsImpl.class);
 
   @SuppressWarnings("SameParameterValue")
   private static boolean envFlag(String name, boolean defaultValue) {
@@ -68,7 +73,14 @@ public class App {
                   ctx.result(proxyWorkflow.runWorkflow(input));
                 });
               })
-              .start(8000);
+              .start(8000)
+              .jettyServer()
+              .server()
+              .join();
+    } catch (InterruptedException e) {
+        throw new RuntimeException(e);
+    } finally {
+      logger.info("Application exiting.");
     }
   }
 }
