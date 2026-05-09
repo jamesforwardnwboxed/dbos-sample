@@ -1,10 +1,10 @@
 # StepChange Sample Apps
 
-This repository contains sample applications for DBOS in multiple languages (Go, TypeScript, Python, and Java), alongside the `StepChange` control plane service used by them.
+This repository contains sample applications for DBOS in multiple languages and frameworks (Go, TypeScript, Python, and Javalin), alongside the `StepChange` control plane service used by them.
 
 ## What It Does
 
-Each language directory (`go`, `typescript`, `python`, `java`) contains a complete, containerized sample application that uses the DBOS SDK to run durable workflows. These applications are designed to demonstrate:
+Each sample directory (`go`, `typescript`, `python`, `javalin`) contains a complete, containerized application that uses the DBOS SDK to run durable workflows. These applications are designed to demonstrate:
 
 - Durable workflow execution with automatic checkpointing and recovery.
 - Integration with the `StepChange` control plane for operator actions (recovery, cancel, resume, restart, fork) and monitoring via a browser dashboard.
@@ -63,11 +63,10 @@ docker build -t stepchange:latest .
 
 ### 2. Run a specific language stack
 
-Navigate to the desired directory and use `docker compose up`. For example, to run the Go sample:
+Run the compose file for the sample you want. For example, to run the Go sample:
 
 ```bash
-cd go
-docker compose up --build
+docker compose -f docker-compose-go.yml up --build
 ```
 
 The services will be available at:
@@ -109,7 +108,7 @@ docker compose up --build
 - [Go](./go/README.md)
 - [TypeScript](./typescript/README.md)
 - [Python](./python/README.md)
-- [Java](./java/README.md)
+- [Javalin](./javalin/README.md)
 
 ## Stopping the Stack
 

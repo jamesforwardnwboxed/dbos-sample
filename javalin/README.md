@@ -1,6 +1,6 @@
-# DBOS Java Starter
+# DBOS Javalin Starter
 
-This branch contains the Java version of the sample app.
+This directory contains the Javalin-based Java version of the sample app.
 
 ## What it does
 
@@ -60,7 +60,7 @@ docker build -t stepchange:latest dbos-control-plane
 Then bring up the stack from this repo:
 
 ```bash
-docker compose up --build
+docker compose -f docker-compose-javalin.yml up --build
 ```
 
 This starts:
@@ -83,7 +83,7 @@ Default behavior keeps workflow and lifecycle logs at `info` while leaving HTTP 
 
 ## Try the recovery flow
 
-1. Start the stack with `docker compose up --build`.
+1. Start the stack with `docker compose -f docker-compose-javalin.yml up --build`.
 2. Open `http://localhost:8000/?name=world`.
 3. Open `http://localhost:8000/?name=poison` to make the app container exit intentionally.
 4. Docker Compose restarts the app container automatically.
@@ -92,11 +92,11 @@ Default behavior keeps workflow and lifecycle logs at `info` while leaving HTTP 
 ## Stop the stack
 
 ```bash
-docker compose down
+docker compose -f docker-compose-javalin.yml down
 ```
 
 To also remove the Postgres volume:
 
 ```bash
-docker compose down -v
+docker compose -f docker-compose-javalin.yml down -v
 ```

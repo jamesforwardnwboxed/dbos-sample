@@ -13,11 +13,11 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data_java:/var/lib/postgresql/data
+      - postgres_data_javalin:/var/lib/postgresql/data
 
   app:
     build:
-      context: java
+      context: javalin
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,4 +53,4 @@ services:
     restart: on-failure
 
 volumes:
-  postgres_data_java:
+  postgres_data_javalin:
