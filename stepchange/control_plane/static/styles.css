@@ -274,15 +274,13 @@ button {
 .fork-step-edit-title,
 .inspect-title,
 .req-type,
-.ev-type,
 .td-mono,
 .td-id,
 .fork-status-value,
 .fork-step-name,
 .fork-step-time,
 .panel-badge,
-.req-time,
-.ev-time {
+.req-time {
   font-family: var(--font-mono);
 }
 
@@ -416,12 +414,6 @@ button {
   background: var(--red-soft);
 }
 
-.two-col {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 18px;
-}
-
 .panel {
   background: rgba(255, 253, 249, 0.88);
   border: 1px solid var(--border);
@@ -470,40 +462,26 @@ button {
   font-size: 13px;
 }
 
-.event-log,
 .request-log {
   overflow-y: auto;
   max-height: 380px;
 }
 
-.event-row,
 .req-row {
   border-bottom: 1px solid rgba(214, 207, 191, 0.55);
 }
 
-.event-row:last-child,
 .req-row:last-child,
 .workflow-table tr:last-child td {
   border-bottom: none;
 }
 
-.event-row {
-  display: grid;
-  grid-template-columns: 78px 22px 160px 1fr;
-  gap: 10px;
-  padding: 10px 16px;
-  align-items: start;
-}
-
-.event-row:hover,
 .req-row:hover {
   background: rgba(247, 243, 235, 0.6);
 }
 
-.ev-time,
 .req-time,
 .td-dim,
-.ev-summary,
 .req-id,
 .panel-hint,
 .fork-step-time,
@@ -525,7 +503,6 @@ button {
   font-size: 12px;
 }
 
-.ev-time,
 .req-time,
 .req-id,
 .td-id,
@@ -533,7 +510,6 @@ button {
   font-size: 10px;
 }
 
-.ev-type,
 .req-type,
 .td-mono,
 .fork-status-value,
@@ -542,20 +518,11 @@ button {
   color: var(--text-1);
 }
 
-.ev-type {
-  font-size: 10px;
-}
-
-.ev-summary,
 .req-row,
 .workflow-table,
 .inspect-body {
   font-size: 12px;
 }
-
-.ev-dir-in { color: var(--blue); }
-.ev-dir-out { color: var(--accent-strong); }
-.ev-dir-sys { color: var(--slate); font-size: 12px; }
 
 .req-row {
   display: grid;
@@ -1064,10 +1031,6 @@ button {
     display: none;
   }
 
-  .two-col {
-    grid-template-columns: 1fr;
-  }
-
   .fork-foot {
     grid-template-columns: 1fr;
   }
@@ -1098,10 +1061,6 @@ button {
 
   .session-strip {
     grid-template-columns: 1fr 1fr;
-  }
-
-  .event-row {
-    grid-template-columns: 1fr;
   }
 
   .req-row {

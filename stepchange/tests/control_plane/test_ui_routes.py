@@ -23,7 +23,6 @@ class FakeManager:
         return {
             "session": {"status": "ready"},
             "requests": [],
-            "events": [],
             "last_list_workflows_output": [],
             "last_list_queued_workflows_output": [],
             "last_workflow_output": None,
@@ -210,12 +209,14 @@ def test_ui_and_static_assets_are_served() -> None:
         assert "fork-input-override" in ui_response.text
         assert "fork-cancel-original" in ui_response.text
         assert "Execute this forked workflow now?" in ui_response.text
+        assert "Event Stream" not in ui_response.text
         assert js_response.status_code == 200
         assert "setInterval(refresh, 5000);" in js_response.text
         assert "cancel_original_if_active" in js_response.text
         assert "/api/control-plane/execute-staged-fork" in js_response.text
         assert "DBOS_JSON" in js_response.text
         assert "Python pickle payloads are shown raw" in js_response.text
+        assert "renderEvents" not in js_response.text
 
 
 def test_http_routes_delegate_to_manager() -> None:

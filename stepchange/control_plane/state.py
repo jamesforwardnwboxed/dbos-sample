@@ -1124,13 +1124,12 @@ class ConductorManager:
             requests = [
                 asdict(record)
                 for record in sorted(self._requests.values(), key=lambda item: item.created_at, reverse=True)
+                if record.message_type != protocol.MessageType.LIST_WORKFLOWS.value
             ]
-            events = [asdict(event) for event in reversed(self._events)]
             return {
                 "configured_app_name": self.app_name,
                 "session": session,
                 "requests": requests,
-                "events": events,
                 "last_list_workflows_output": self._last_list_workflows_output,
                 "last_list_queued_workflows_output": self._last_list_queued_workflows_output,
                 "last_workflow_output": self._last_workflow_output,

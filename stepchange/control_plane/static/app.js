@@ -74,12 +74,6 @@ function badge(status) {
   return `<span class="badge badge-${cls}">${escHtml(status ?? '—')}</span>`;
 }
 
-function dirIcon(dir) {
-  if (dir === 'inbound')  return `<span class="ev-dir ev-dir-in"  title="inbound">←</span>`;
-  if (dir === 'outbound') return `<span class="ev-dir ev-dir-out" title="outbound">→</span>`;
-  return `<span class="ev-dir ev-dir-sys" title="system">◆</span>`;
-}
-
 function renderConnection(state) {
   const el    = $('connection-status');
   const label = $('conn-label');
@@ -134,25 +128,6 @@ function renderSession(state) {
 
   $('sess-connected-at').textContent = relTime(s.connected_at);
   $('sess-last-seen').textContent    = relTime(s.last_seen_at);
-}
-
-function renderEvents(events) {
-  const el = $('event-log');
-  $('event-count').textContent = events.length;
-
-  if (!events.length) {
-    el.innerHTML = '<div class="empty-hint">No events yet</div>';
-    return;
-  }
-
-  el.innerHTML = events.map(ev => `
-    <div class="event-row">
-      <span class="ev-time">${clockStamp(ev.timestamp)}</span>
-      ${dirIcon(ev.direction)}
-      <span class="ev-type">${escHtml(ev.message_type)}</span>
-      <span class="ev-summary">${escHtml(ev.summary)}</span>
-    </div>
-  `).join('');
 }
 
 function renderRequests(requests) {
@@ -906,7 +881,6 @@ async function refreshState() {
 
     renderConnection(state);
     renderSession(state);
-    renderEvents(state.events ?? []);
     renderRequests(state.requests ?? []);
     renderWorkflows(state.last_list_workflows_output ?? []);
 

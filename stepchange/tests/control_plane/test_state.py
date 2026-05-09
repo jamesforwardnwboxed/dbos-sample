@@ -117,6 +117,7 @@ async def test_list_workflows_round_trip_completes_request() -> None:
 
     assert record.status == "succeeded"
     assert snapshot["last_list_workflows_output"][0]["WorkflowUUID"] == "wf-1"
+    assert snapshot["requests"] == []
 
 
 @pytest.mark.asyncio
@@ -368,7 +369,6 @@ async def test_record_local_action_updates_snapshot() -> None:
     assert record.status == "succeeded"
     assert snapshot["requests"][0]["message_type"] == "stage_edited_fork"
     assert snapshot["requests"][0]["request_payload"]["workflow_input_override"] == {"name": "Ada"}
-    assert snapshot["events"][0]["summary"] == "completed local stage_edited_fork action"
 
 
 def test_stage_edited_fork_sync_uses_native_fork_and_patches_workflow_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
