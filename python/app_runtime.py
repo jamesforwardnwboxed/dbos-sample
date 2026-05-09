@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from dbos import DBOS, DBOSConfig
+from dbos import DBOS, DBOSConfig, WorkflowSerializationFormat
 from fastapi import FastAPI
 
 app = FastAPI()
@@ -74,7 +74,7 @@ def run_workflow_logic(name: str = "world") -> None:
 
 
 @app.get("/")
-@DBOS.workflow()
+@DBOS.workflow(serialization_type=WorkflowSerializationFormat.PORTABLE)
 def dbos_workflow(name: str = "world") -> Any:
     return run_workflow_logic(name)
 

@@ -118,7 +118,7 @@ async function workflow(input: WorkflowInput): Promise<void> {
   log("info", `Completed workflow for ${input.name}`);
 }
 
-const dbosWorkflow = DBOS.registerWorkflow(workflow);
+const dbosWorkflow = DBOS.registerWorkflow(workflow, { serialization: "portable" });
 
 app.get("/", async (req, res, next) => {
   try {

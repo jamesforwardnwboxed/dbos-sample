@@ -1,5 +1,6 @@
 package org.example;
 
+import dev.dbos.transact.workflow.SerializationStrategy;
 import dev.dbos.transact.workflow.Workflow;
 import jakarta.inject.Singleton;
 import org.slf4j.Logger;
@@ -16,7 +17,7 @@ public class WorkflowService {
         this.stepService = stepService;
     }
 
-    @Workflow(name = "basic-workflow")
+    @Workflow(name = "basic-workflow", serializationStrategy = SerializationStrategy.PORTABLE)
     public String runWorkflow(WorkflowInput input) {
         logger.info("Starting workflow for {}", input.name());
         StepOneResult stepOneResult = stepService.stepOne(input);

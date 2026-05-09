@@ -1,5 +1,6 @@
 package org.example;
 
+import dev.dbos.transact.workflow.SerializationStrategy;
 import dev.dbos.transact.workflow.Workflow;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,7 +14,7 @@ class MyWorkflowImpl implements MyWorkflow {
         this.mySteps = mySteps;
     }
 
-    @Workflow(name = "basic-workflow")
+    @Workflow(name = "basic-workflow", serializationStrategy = SerializationStrategy.PORTABLE)
     public String runWorkflow(WorkflowInput input) {
         logger.info("Starting workflow for {}", input.name());
         StepOneResult stepOneResult = mySteps.stepOne(input);

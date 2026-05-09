@@ -62,16 +62,11 @@ func configureLogging() (string, bool) {
 
 func workflow(ctx dbos.DBOSContext, input WorkflowInput) (string, error) {
 	logger.Info("starting workflow", "name", input.Name)
-	stepOneResultAny, err := dbos.RunAsStep(ctx, func(stepCtx context.Context) (any, error) {
+	stepOneResult, err := dbos.RunAsStep(ctx, func(stepCtx context.Context) (StepOneResult, error) {
 		return stepOne(stepCtx, input)
 	})
 	if err != nil {
 		return "", err
-	}
-
-	stepOneResult, ok := stepOneResultAny.(StepOneResult)
-	if !ok {
-		return "", fmt.Errorf("unexpected stepOne result type %T", stepOneResultAny)
 	}
 
 	if input.Name == "poison" {
@@ -79,7 +74,7 @@ func workflow(ctx dbos.DBOSContext, input WorkflowInput) (string, error) {
 		os.Exit(1)
 	}
 
-	_, err = dbos.RunAsStep(ctx, func(stepCtx context.Context) (any, error) {
+	_, err = dbos.RunAsStep(ctx, func(stepCtx context.Context) (string, error) {
 		return stepTwo(stepCtx, input, stepOneResult)
 	})
 	if err != nil {
@@ -97,8 +92,8 @@ func stepOne(ctx context.Context, input WorkflowInput) (StepOneResult, error) {
 		Greeting:   fmt.Sprintf("Hello %s", input.Name),
 		NameLength: len(input.Name),
 		Metrics: map[string]int{
-			"nameLength": len(input.Name),
-			"aliasCount": len(input.Aliases),
+			"nameLength":  len(input.Name),
+			"aliasCount":  len(input.Aliases),
 			"weightCount": len(input.Weights),
 		},
 	}, nil
@@ -165,7 +160,7 @@ func main() {
 		name := c.DefaultQuery("name", "world")
 		input := buildWorkflowInput(name)
 
-		handle, runErr := dbos.RunWorkflow(dbosContext, workflow, input)
+		handle, runErr := dbos.RunWorkflow(dbosContext, workflow, input, dbos.WithPortableWorkflow())
 		if runErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": runErr.Error()})
 			return

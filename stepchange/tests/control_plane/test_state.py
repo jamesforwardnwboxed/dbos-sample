@@ -1295,6 +1295,51 @@ def test_load_workflow_input_metadata_builds_python_editor(monkeypatch: pytest.M
     }
 
 
+def test_load_workflow_input_metadata_builds_portable_editor(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = ConductorManager(
+        app_name="dbos-starter",
+        conductor_key="local-conductor-key",
+        system_database_url="postgres://postgres:dbos@postgres:5432/dbos_starter",
+    )
+
+    captured: dict[str, object] = {
+        "fetchone_results": [SimpleNamespace(inputs="serialized", serialization="portable_json")],
+    }
+
+    class DummyClient:
+        def __init__(self, system_database_url: str) -> None:
+            self._serializer = object()
+            self._sys_db = SimpleNamespace(
+                engine=SimpleNamespace(begin=lambda: _DummyBeginContext(captured)),
+            )
+
+        def destroy(self) -> None:
+            return None
+
+    monkeypatch.setattr("control_plane.state.DBOSClient", DummyClient)
+    monkeypatch.setattr(
+        "control_plane.state._deserialize_workflow_args",
+        lambda serialized_value, serialization, serializer: {
+            "args": ({"name": "portable"}, 7),
+            "kwargs": {"mode": "cross-language"},
+        },
+    )
+
+    result = manager._load_workflow_input_metadata_sync("wf-1")
+
+    assert result == {
+        "value": "serialized",
+        "serialization": "portable_json",
+        "editor": {
+            "mode": "portable-args-kwargs",
+            "value": {
+                "args": [{"name": "portable"}, 7],
+                "kwargs": {"mode": "cross-language"},
+            },
+        },
+    }
+
+
 def test_load_step_output_metadata_reads_raw_outputs(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = ConductorManager(
         app_name="dbos-starter",
@@ -1373,6 +1418,49 @@ def test_load_step_output_metadata_builds_python_editor(monkeypatch: pytest.Monk
             "editor": {
                 "mode": "python-value",
                 "value": {"greeting": "Hello poison", "count": 6},
+            },
+        }
+    }
+
+
+def test_load_step_output_metadata_builds_portable_editor(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = ConductorManager(
+        app_name="dbos-starter",
+        conductor_key="local-conductor-key",
+        system_database_url="postgres://postgres:dbos@postgres:5432/dbos_starter",
+    )
+
+    captured: dict[str, object] = {
+        "fetchall_results": [[
+            SimpleNamespace(function_id=1, output="serialized-step", serialization="portable_json"),
+        ]],
+    }
+
+    class DummyClient:
+        def __init__(self, system_database_url: str) -> None:
+            self._serializer = object()
+            self._sys_db = SimpleNamespace(
+                engine=SimpleNamespace(begin=lambda: _DummyBeginContext(captured)),
+            )
+
+        def destroy(self) -> None:
+            return None
+
+    monkeypatch.setattr("control_plane.state.DBOSClient", DummyClient)
+    monkeypatch.setattr(
+        "control_plane.state.deserialize_value",
+        lambda serialized_value, serialization, serializer: {"greeting": "Hello portable", "count": 3},
+    )
+
+    result = manager._load_step_output_metadata_sync("wf-1")
+
+    assert result == {
+        1: {
+            "value": "serialized-step",
+            "serialization": "portable_json",
+            "editor": {
+                "mode": "portable-value",
+                "value": {"greeting": "Hello portable", "count": 3},
             },
         }
     }

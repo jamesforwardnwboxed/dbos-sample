@@ -777,6 +777,24 @@ class ConductorManager:
                         }
                     except Exception:
                         editor = None
+                elif row.serialization == DBOSPortableJSON.name() and isinstance(row.inputs, str):
+                    try:
+                        decoded = _deserialize_workflow_args(
+                            row.inputs,
+                            row.serialization,
+                            client._serializer,
+                        )
+                        editor = {
+                            "mode": "portable-args-kwargs",
+                            "value": _json_safe_preview(
+                                {
+                                    "args": list(decoded.get("args") or ()),
+                                    "kwargs": dict(decoded.get("kwargs") or {}),
+                                }
+                            ),
+                        }
+                    except Exception:
+                        editor = None
                 elif row.serialization == DBOSDefaultSerializer.name() and isinstance(row.inputs, str):
                     try:
                         decoded = deserialize_args(row.inputs, row.serialization, client._serializer)
@@ -1403,6 +1421,16 @@ def _step_output_editor_metadata(
             return {
                 "mode": "decoded-json",
                 "value": _json_safe_preview(_dbos_json_decode(serialized_value)),
+            }
+        except Exception:
+            return None
+    if serialization == DBOSPortableJSON.name():
+        try:
+            return {
+                "mode": "portable-value",
+                "value": _json_safe_preview(
+                    deserialize_value(serialized_value, serialization, serializer)
+                ),
             }
         except Exception:
             return None
