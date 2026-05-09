@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: dbos_starter
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: dbos
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d dbos_starter"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_spring_boot:/var/lib/postgresql/data
+
+  app:
+    build:
+      context: spring-boot
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DBOS_APPLICATION_NAME: dbos-starter
+      DBOS_DATASOURCE_URL: jdbc:postgresql://postgres:5432/dbos_starter
+      DBOS_DATASOURCE_USERNAME: postgres
+      DBOS_DATASOURCE_PASSWORD: dbos
+      DBOS_CONDUCTOR_DOMAIN: ws://control-plane:8001
+      DBOS_CONDUCTOR_KEY: local-conductor-key
+      APP_LOG_LEVEL: info
+      APP_ACCESS_LOG: "false"
+    ports:
+      - "8000:8000"
+    restart: on-failure
+
+  control-plane:
+    build:
+      context: .
+    image: stepchange:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      CONTROL_PLANE_APP_NAME: dbos-starter
+      CONTROL_PLANE_CONDUCTOR_KEY: local-conductor-key
+      CONTROL_PLANE_SYSTEM_DATABASE_URL: postgres://postgres:dbos@postgres:5432/dbos_starter
+      CONTROL_PLANE_PORT: 8001
+      CONTROL_PLANE_LOG_LEVEL: warning
+      CONTROL_PLANE_ACCESS_LOG: "false"
+    ports:
+      - "8001:8001"
+    restart: on-failure
+
+volumes:
+  postgres_data_spring_boot:

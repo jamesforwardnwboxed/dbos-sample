@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: dbos-starter
+
+server:
+  port: ${SERVER_PORT:8000}
+  shutdown: immediate
+  tomcat:
+    accesslog:
+      enabled: ${APP_ACCESS_LOG:false}
+
+logging:
+  level:
+    root: ${APP_LOG_LEVEL:INFO}
+    dev.dbos.transact.conductor: WARN
+
+dbos:
+  application:
+    name: ${DBOS_APPLICATION_NAME:${spring.application.name}}
+  datasource:
+    url: ${DBOS_DATASOURCE_URL:jdbc:postgresql://localhost:5432/dbos_starter}
+    username: ${DBOS_DATASOURCE_USERNAME:postgres}
+    password: ${DBOS_DATASOURCE_PASSWORD:dbos}
