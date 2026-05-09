@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+import logging
+
+import pytest
+
+import app_runtime
+
+
+def test_build_dbos_config_reads_conductor_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DBOS_APP_NAME", "custom-app")
+    monkeypatch.setenv("DBOS_SYSTEM_DATABASE_URL", "postgres://postgres:dbos@postgres:5432/dbos_starter")
+    monkeypatch.setenv("DBOS_CONDUCTOR_URL", "ws://control-plane:8001")
+    monkeypatch.setenv("DBOS_CONDUCTOR_KEY", "test-key")
+
+    config = app_runtime.build_dbos_config()
+
+    assert config["name"] == "custom-app"
+    assert config["system_database_url"] == "postgres://postgres:dbos@postgres:5432/dbos_starter"
+    assert config["conductor_url"] == "ws://control-plane:8001"
+    assert config["conductor_key"] == "test-key"
+
+
+def test_run_workflow_logic_exits_for_poison_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[tuple[str, object]] = []
+
+    monkeypatch.setattr(
+        app_runtime,
+        "step_one",
+        lambda input_data: app_runtime.StepOneResult(
+            greeting=f"Hello {input_data.name}",
+            name_length=len(input_data.name),
+            metrics={"name_length": len(input_data.name)},
+        ),
+    )
+    monkeypatch.setattr(
+        app_runtime,
+        "step_two",
+        lambda input_data, step_one_result: events.append((input_data.name, step_one_result.name_length)),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        app_runtime.run_workflow_logic("poison")
+
+    assert exc_info.value.code == 1
+    assert events == []
+
+
+def test_run_workflow_logic_completes_for_non_poison_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[tuple[str, int]] = []
+
+    monkeypatch.setattr(
+        app_runtime,
+        "step_one",
+        lambda input_data: app_runtime.StepOneResult(
+            greeting=f"Hello {input_data.name}",
+            name_length=len(input_data.name),
+            metrics={"name_length": len(input_data.name)},
+        ),
+    )
+    monkeypatch.setattr(
+        app_runtime,
+        "step_two",
+        lambda input_data, step_one_result: events.append((input_data.name, step_one_result.name_length)),
+    )
+
+    app_runtime.run_workflow_logic("James")
+
+    assert events == [("James", 5)]
+
+
+def test_build_workflow_input_returns_structured_payload() -> None:
+    workflow_input = app_runtime.build_workflow_input("Ada")
+
+    assert workflow_input.name == "Ada"
+    assert workflow_input.aliases == ["ADA", "adA"]
+    assert workflow_input.weights == {"primary": 3, "secondary": 1}
+
+
+def test_configure_logging_defaults_to_info(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("APP_LOG_LEVEL", raising=False)
+
+    app_runtime.configure_logging()
+
+    assert logging.getLogger().getEffectiveLevel() == logging.INFO
+
+
+def test_configure_logging_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_LOG_LEVEL", "debug")
+
+    app_runtime.configure_logging()
+
+    assert logging.getLogger().getEffectiveLevel() == logging.DEBUG

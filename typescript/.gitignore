@@ -1,0 +1,4 @@
+__pycache__/
+dist/
+existing.txt
+node_modules/
