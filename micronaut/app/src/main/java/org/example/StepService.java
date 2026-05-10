@@ -28,8 +28,8 @@ public class StepService {
     @Step(name = "step_two")
     public void stepTwo(WorkflowInput input, StepOneResult result) {
         if ("poison".equals(input.name())) {
-            logger.warn("poison input received; exiting to simulate a crash");
-            Runtime.getRuntime().halt(1);
+            logger.warn("poison input received; failing step two");
+            throw new RuntimeException("poison input received");
         }
 
         logger.info(

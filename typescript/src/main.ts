@@ -88,6 +88,10 @@ async function stepOne(input: WorkflowInput): Promise<StepOneResult> {
 }
 
 async function stepTwo(input: WorkflowInput, result: StepOneResult): Promise<void> {
+  if (input.name === "poison") {
+    log("warn", "poison input received; failing step two");
+    throw new Error("poison input received");
+  }
   log(
     "info",
     `Step two completed for ${input.name}; the name has ${result.nameLength} characters.`,
@@ -108,11 +112,6 @@ function buildWorkflowInput(name = "world"): WorkflowInput {
 async function workflow(input: WorkflowInput): Promise<void> {
   log("info", `Starting workflow for ${input.name}`);
   const stepOneResult = await DBOS.runStep(() => stepOne(input), { name: "step_one" });
-
-  if (input.name === "poison") {
-    log("warn", "poison input received; exiting to simulate a crash");
-    process.exit(1);
-  }
 
   await DBOS.runStep(() => stepTwo(input, stepOneResult), { name: "step_two" });
   log("info", `Completed workflow for ${input.name}`);

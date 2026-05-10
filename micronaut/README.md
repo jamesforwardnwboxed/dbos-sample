@@ -8,8 +8,8 @@ The app exposes `GET /` and runs the same DBOS workflow as the Javalin and Sprin
 
 - the workflow input is a structured Java object built from the `name` query parameter
 - `stepOne` prints a greeting and returns a structured Java object containing the greeting, name length, and extra metrics
-- the workflow exits immediately when `name=poison` to simulate a crash
-- otherwise the workflow continues to `stepTwo`
+- `stepTwo` throws an ordinary exception when `name=poison`
+- otherwise the workflow completes normally
 
 The `dbos-micronaut` module is an in-repo Micronaut-native integration that mirrors the Spring Boot starter responsibilities using Micronaut conventions:
 

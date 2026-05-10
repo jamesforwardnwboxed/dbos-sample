@@ -21,7 +21,7 @@ def test_build_dbos_config_reads_conductor_env(monkeypatch: pytest.MonkeyPatch) 
     assert config["conductor_key"] == "test-key"
 
 
-def test_run_workflow_logic_exits_for_poison_input(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_workflow_logic_raises_for_poison_input(monkeypatch: pytest.MonkeyPatch) -> None:
     events: list[tuple[str, object]] = []
 
     monkeypatch.setattr(
@@ -33,16 +33,14 @@ def test_run_workflow_logic_exits_for_poison_input(monkeypatch: pytest.MonkeyPat
             metrics={"name_length": len(input_data.name)},
         ),
     )
-    monkeypatch.setattr(
-        app_runtime,
-        "step_two",
-        lambda input_data, step_one_result: events.append((input_data.name, step_one_result.name_length)),
-    )
+    def fail_step_two(input_data, step_one_result):
+        raise RuntimeError("poison input received")
 
-    with pytest.raises(SystemExit) as exc_info:
+    monkeypatch.setattr(app_runtime, "step_two", fail_step_two)
+
+    with pytest.raises(RuntimeError, match="poison input received"):
         app_runtime.run_workflow_logic("poison")
 
-    assert exc_info.value.code == 1
     assert events == []
 
 

@@ -69,11 +69,6 @@ func workflow(ctx dbos.DBOSContext, input WorkflowInput) (string, error) {
 		return "", err
 	}
 
-	if input.Name == "poison" {
-		logger.Warn("poison input received; exiting to simulate a crash")
-		os.Exit(1)
-	}
-
 	_, err = dbos.RunAsStep(ctx, func(stepCtx context.Context) (string, error) {
 		return stepTwo(stepCtx, input, stepOneResult)
 	})
@@ -100,6 +95,10 @@ func stepOne(ctx context.Context, input WorkflowInput) (StepOneResult, error) {
 }
 
 func stepTwo(ctx context.Context, input WorkflowInput, result StepOneResult) (string, error) {
+	if input.Name == "poison" {
+		logger.Warn("poison input received; failing step two")
+		return "", fmt.Errorf("poison input received")
+	}
 	logger.Info("step two completed", "name", input.Name, "name_length", result.NameLength)
 	return "ok", nil
 }

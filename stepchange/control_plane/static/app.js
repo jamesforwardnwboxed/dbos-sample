@@ -167,6 +167,9 @@ function renderWorkflows(workflows) {
     const queue  = wf.QueueName || '—';
     const createdAt = wf.CreatedAt;
     const updatedAt = wf.UpdatedAt;
+    const primaryAction = status === 'SUCCESS'
+      ? `<button class="btn-sm" onclick="doRestart('${escAttr(id)}')">restart</button>`
+      : `<button class="btn-sm" onclick="doResume('${escAttr(id)}')">resume</button>`;
 
     return `<tr>
       <td class="td-id" title="${escHtml(id)}">${escHtml(truncId(id))}</td>
@@ -178,7 +181,7 @@ function renderWorkflows(workflows) {
       <td>
         <div class="wf-actions">
           <button class="btn-sm" onclick="doInspect('${escAttr(id)}')">inspect</button>
-          <button class="btn-sm" onclick="doResume('${escAttr(id)}')">resume</button>
+          ${primaryAction}
           <button class="btn-sm btn-sm-fork" onclick="doFork('${escAttr(id)}')">fork</button>
           <button class="btn-sm btn-sm-red" onclick="doCancel('${escAttr(id)}')">cancel</button>
         </div>
@@ -265,6 +268,12 @@ window.doCancel = async (id) => {
 window.doResume = async (id) => {
   try {
     await callApi('/api/control-plane/resume', { workflow_id: id }, 'resume');
+  } catch (_) {}
+};
+
+window.doRestart = async (id) => {
+  try {
+    await callApi('/api/control-plane/restart', { workflow_id: id }, 'restart');
   } catch (_) {}
 };
 

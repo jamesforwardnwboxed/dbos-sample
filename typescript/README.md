@@ -8,8 +8,8 @@ The app exposes `GET /` and runs a DBOS workflow with two steps:
 
 - the workflow input is a structured TypeScript object built from the `name` query parameter
 - `step_one` logs a greeting and returns a structured TypeScript object containing the greeting, name length, and extra metrics
-- the workflow exits immediately when `name=poison` to simulate a crash
-- otherwise the workflow continues to `step_two`
+- `step_two` throws an ordinary error when `name=poison`
+- otherwise the workflow completes normally
 
 Call the endpoint with an optional `name` query parameter, for example `/?name=James`.
 
@@ -85,9 +85,9 @@ Default behavior keeps workflow and lifecycle logs at `info` while leaving HTTP 
 
 1. Start the stack with `docker compose up --build`.
 2. Open `http://localhost:8000/?name=world`.
-3. Open `http://localhost:8000/?name=poison` to make the app container exit intentionally.
-4. Docker Compose restarts the app container automatically.
-5. Trigger recovery or inspect the control-plane UI to observe the poisoned workflow state.
+3. Open `http://localhost:8000/?name=poison` to make `step_two` fail.
+4. Inspect the workflow in StepChange and confirm it is recorded as an error.
+5. Trigger restart, resume, or fork flows from the control-plane UI as needed.
 
 ## Stop the stack
 

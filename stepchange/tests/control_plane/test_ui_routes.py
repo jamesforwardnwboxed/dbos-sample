@@ -214,6 +214,8 @@ def test_ui_and_static_assets_are_served() -> None:
         assert "setInterval(refresh, 5000);" in js_response.text
         assert "cancel_original_if_active" in js_response.text
         assert "/api/control-plane/execute-staged-fork" in js_response.text
+        assert "doRestart" in js_response.text
+        assert "/api/control-plane/restart" in js_response.text
         assert "DBOS_JSON" in js_response.text
         assert "Python pickle payloads are shown raw" in js_response.text
         assert "renderEvents" not in js_response.text

@@ -41,6 +41,9 @@ def step_one(input_data: WorkflowInput) -> StepOneResult:
 
 @DBOS.step()
 def step_two(input_data: WorkflowInput, step_one_result: StepOneResult) -> None:
+    if input_data.name == "poison":
+        logger.warning("poison input received; failing step two")
+        raise RuntimeError("poison input received")
     logger.info(
         "Step two completed for %s; the name has %d characters.",
         input_data.name,
@@ -66,9 +69,6 @@ def run_workflow_logic(name: str = "world") -> None:
     workflow_input = build_workflow_input(name)
     logger.info("Starting workflow for %s", workflow_input.name)
     step_one_result = step_one(workflow_input)
-    if workflow_input.name == "poison":
-        logger.warning("poison input received; exiting to simulate a crash")
-        raise SystemExit(1)
     step_two(workflow_input, step_one_result)
     logger.info("Completed workflow for %s", workflow_input.name)
 
